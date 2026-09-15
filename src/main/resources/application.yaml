@@ -3,7 +3,7 @@ spring:
     name: credit-assistant
 
 langchain4j:
-  open-ai:
+  ollama:
     chat-model:
-      api-key: ${OPENAI_API_KEY}
-      model-name: ${OPENAI_MODEL:gpt-5.4-mini}
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      model-name: ${OLLAMA_MODEL:llama3.2}
