@@ -1,3 +1,9 @@
 spring:
   application:
     name: credit-assistant
+
+langchain4j:
+  open-ai:
+    chat-model:
+      api-key: ${OPENAI_API_KEY}
+      model-name: ${OPENAI_MODEL:gpt-5.4-mini}
