@@ -6,4 +6,5 @@ langchain4j:
   ollama:
     chat-model:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
-      model-name: ${OLLAMA_MODEL:llama3.2}
+      model-name: ${OLLAMA_MODEL:qwen3:8b}
+      timeout: ${OLLAMA_TIMEOUT:PT3M}
