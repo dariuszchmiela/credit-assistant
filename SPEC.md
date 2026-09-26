@@ -752,11 +752,31 @@ Supported decisions:
 
 Reason codes shall be represented using explicit application-level values rather than free-form LLM-generated strings.
 
-Example reason codes:
+Supported reason codes:
 
-- `SUFFICIENT_DISPOSABLE_INCOME`,
-- `INSUFFICIENT_DISPOSABLE_INCOME`,
-- `REQUESTED_AMOUNT_TOO_HIGH`.
+- `ELIGIBLE`,
+- `INCOME_TOO_LOW`,
+- `OBLIGATIONS_TOO_HIGH`,
+- `LOAN_AMOUNT_TOO_HIGH`.
+
+The MVP uses the following deterministic mock eligibility policy:
+
+- minimum monthly income: 3000,
+- maximum existing monthly obligations: 50% of monthly income,
+- monthly disposable income = monthly income - existing monthly obligations,
+- maximum requested loan amount: 12 × monthly disposable income.
+
+Rules shall be evaluated in this order:
+
+1. minimum monthly income (`INCOME_TOO_LOW`),
+2. obligations-to-income ratio (`OBLIGATIONS_TOO_HIGH`),
+3. requested loan amount (`LOAN_AMOUNT_TOO_HIGH`).
+
+The first failed rule determines the `NOT_ELIGIBLE` decision and its reason code.
+
+Values exactly equal to a limit are allowed.
+
+When all rules pass, the decision is `ELIGIBLE` with reason code `ELIGIBLE`.
 
 ### 10.4 Knowledge document
 
