@@ -1,0 +1,149 @@
+{
+  "description": "FR-009 evaluation set of the credit assistant. SYNTHETIC DATA ONLY: the contract number and PESEL are demo values of this repository, not real personal data. Patterns in requiredConcepts and forbiddenConcepts are case-insensitive regular expressions; requiredFacts are exact values (thousands separators and markdown emphasis in the answer are ignored).",
+  "cases": [
+    {
+      "id": "EVAL-001",
+      "category": "FAQ_RETRIEVAL",
+      "question": "Can the customer change the monthly payment due date? If so, how often can it be changed, which dates are available, is there any fee, and how far in advance must the change be requested?",
+      "expectations": {
+        "retrievalDocumentIds": ["consumer-loan-faq"],
+        "expectedTools": [],
+        "expectedLlmCallCount": 1,
+        "requiredConcepts": [
+          { "name": "once per calendar year", "anyOf": ["once (per|a|each|every) (calendar )?year", "one time (per|a|each) (calendar )?year"] },
+          { "name": "5th", "anyOf": ["\\b5(th)?\\b"] },
+          { "name": "15th", "anyOf": ["\\b15(th)?\\b"] },
+          { "name": "25th", "anyOf": ["\\b25(th)?\\b"] },
+          { "name": "free of charge", "anyOf": ["free", "no (fee|charge|cost)", "without (any )?(fee|charge|cost)", "at no (extra |additional )?cost"] },
+          { "name": "10 days in advance", "anyOf": ["\\b10 days", "ten days"] }
+        ]
+      }
+    },
+    {
+      "id": "EVAL-002",
+      "category": "SEMANTIC_EARLY_REPAYMENT",
+      "question": "Can a borrower pay back only a portion of what they owe ahead of schedule, and what happens to the remaining repayment plan afterwards?",
+      "expectations": {
+        "retrievalDocumentIds": ["early-repayment"],
+        "expectedTools": [],
+        "expectedLlmCallCount": 1,
+        "requiredFacts": ["1000"],
+        "requiredConcepts": [
+          { "name": "partial repayment allowed", "anyOf": ["partial", "part of"] },
+          { "name": "shorter repayment period", "anyOf": ["shorten", "shorter", "reduc\\w* (the )?(repayment |loan )?(period|term|duration)"] },
+          { "name": "lower monthly installment", "anyOf": ["reduc\\w* (the )?(monthly )?installment", "lower (the )?(monthly )?installment", "smaller (monthly )?installment", "(monthly )?installments? (is |are |can be |could be )?(reduced|lowered)"] }
+        ]
+      }
+    },
+    {
+      "id": "EVAL-003",
+      "category": "CONTRACT_STATUS_TOOL",
+      "question": "What is the current status of contract ctr-1001?",
+      "expectations": {
+        "expectedTools": ["getContractStatus"],
+        "expectedLlmCallCount": 2,
+        "requiredFacts": ["ACTIVE", "85000.00", "2026-10-15"],
+        "rawPiiValues": ["ctr-1001"],
+        "expectedPlaceholders": ["[CONTRACT_NUMBER_1]"]
+      }
+    },
+    {
+      "id": "EVAL-004",
+      "category": "INSTALLMENT_CALCULATION_TOOL",
+      "question": "Calculate the installment for 100000 over 60 months at 8% annual interest.",
+      "expectations": {
+        "expectedTools": ["calculateInstallment"],
+        "expectedLlmCallCount": 2,
+        "requiredFacts": ["2027.64", "121658.40"]
+      }
+    },
+    {
+      "id": "EVAL-005",
+      "category": "ELIGIBLE_CUSTOMER",
+      "question": "The customer has 8000 monthly income, 2000 existing monthly obligations and wants a 40000 loan. Is the customer eligible?",
+      "expectations": {
+        "expectedTools": ["checkEligibility"],
+        "expectedLlmCallCount": 2,
+        "requiredFacts": ["ELIGIBLE"],
+        "forbiddenConcepts": [
+          { "name": "negative decision", "anyOf": ["NOT[_ ]ELIGIBLE", "ineligible", "is not eligible"] }
+        ]
+      }
+    },
+    {
+      "id": "EVAL-006",
+      "category": "INELIGIBLE_CUSTOMER",
+      "question": "The customer has 8000 monthly income, 2000 existing monthly obligations and wants a 100000 loan. Is the customer eligible?",
+      "expectations": {
+        "expectedTools": ["checkEligibility"],
+        "expectedLlmCallCount": 2,
+        "requiredFacts": ["LOAN_AMOUNT_TOO_HIGH"],
+        "requiredConcepts": [
+          { "name": "negative decision", "anyOf": ["NOT[_ ]ELIGIBLE", "ineligible", "is not eligible"] },
+          { "name": "maximum allowed loan amount 72000", "anyOf": ["\\b72000(\\.00)?\\b"] }
+        ]
+      }
+    },
+    {
+      "id": "EVAL-007",
+      "category": "COMBINED_RAG_AND_TOOL",
+      "question": "What is the current status of contract ctr-1001, and can this contract be repaid early without an additional fee?",
+      "expectations": {
+        "retrievalDocumentIds": ["early-repayment"],
+        "expectedTools": ["getContractStatus"],
+        "expectedLlmCallCount": 2,
+        "requiredFacts": ["ACTIVE"],
+        "requiredConcepts": [
+          { "name": "early repayment allowed", "anyOf": ["repa(y|id)\\w* early", "early repayment", "before the end"] },
+          { "name": "no additional fee", "anyOf": ["no (additional |extra )?(fee|commission|charge)", "without (any )?(additional |extra )?(fee|commission|charge)", "free of charge", "not (be )?charged", "does not charge"] }
+        ],
+        "rawPiiValues": ["ctr-1001"],
+        "expectedPlaceholders": ["[CONTRACT_NUMBER_1]"]
+      }
+    },
+    {
+      "id": "EVAL-008",
+      "category": "PII_MASKING",
+      "question": "Check the status of contract ctr-1001 for the customer with PESEL 44051401458.",
+      "expectations": {
+        "expectedTools": ["getContractStatus"],
+        "expectedLlmCallCount": 2,
+        "requiredFacts": ["ACTIVE", "85000.00", "2026-10-15"],
+        "rawPiiValues": ["ctr-1001", "44051401458"],
+        "expectedPlaceholders": ["[CONTRACT_NUMBER_1]", "[PESEL_1]"]
+      }
+    },
+    {
+      "id": "EVAL-009",
+      "category": "UNSUPPORTED_FUTURE_INFORMATION",
+      "question": "What interest rate will the bank offer this customer next month?",
+      "expectations": {
+        "expectedTools": [],
+        "expectedLlmCallCount": 1,
+        "requiredConcepts": [
+          { "name": "information unavailable", "anyOf": ["not available", "unavailable", "(cannot|can't|can ?not|unable to|not able to|not possible to) (be )?(determine|predict|confirm|provide|know|forecast|say|answer)", "(does not|doesn't|do not|don't) (contain|have|provide|include|specify)", "no information", "not enough information", "insufficient"] }
+        ],
+        "forbiddenConcepts": [
+          { "name": "invented numeric interest rate", "anyOf": ["\\b\\d+(?:[.,]\\d+)?\\s*(?:%|per ?cent\\b)"] }
+        ]
+      }
+    },
+    {
+      "id": "EVAL-010",
+      "category": "MISSING_PRODUCT_KNOWLEDGE",
+      "question": "What insurance premium applies to this consumer loan?",
+      "expectations": {
+        "retrievalDocumentIds": ["consumer-loan-faq"],
+        "expectedTools": [],
+        "expectedLlmCallCount": 1,
+        "requiredConcepts": [
+          { "name": "not covered by documentation", "anyOf": ["not covered", "not available", "unavailable", "(does not|doesn't|do not|don't) (contain|have|provide|include|cover|specify|mention)", "no information", "not enough information", "insufficient", "(cannot|can't|unable to) (be )?(determine|provide|confirm|answer)"] }
+        ],
+        "forbiddenConcepts": [
+          { "name": "invented numeric percentage", "anyOf": ["\\b\\d+(?:[.,]\\d+)?\\s*(?:%|per ?cent\\b)"] },
+          { "name": "invented numeric premium amount", "anyOf": ["\\bpremium\\b[^.\\d]{0,40}\\d"] }
+        ]
+      }
+    }
+  ]
+}

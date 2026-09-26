@@ -221,6 +221,15 @@ The evaluation set shall include scenarios covering:
 
 The evaluation suite shall be executable as an automated test.
 
+Implementation decisions:
+
+- Dataset: `src/test/resources/evaluation/credit-assistant-evaluation.json` (synthetic data, 10 cases, one per
+  SPEC 71 scenario). Evaluation code lives only in test sources (`pl.dch.creditassistant.evaluation`).
+- `mvn test` validates the dataset (`EvaluationDatasetTest`) but does not run the real-model evaluation and needs no LLM.
+- `mvn -Pai-evaluation test` runs only the evaluation (`CreditAssistantEvaluationTest`, JUnit tag `ai-evaluation`)
+  against the real configured Ollama model, with PostgreSQL/pgvector from Testcontainers. It fails with a setup error
+  if the configured model is not available, and fails the build if any case is `FAIL` or `ERROR`.
+
 ### FR-010 — Local development environment
 
 The project shall provide:
@@ -1920,6 +1929,10 @@ The suite shall cover:
 
 Each evaluation case shall contain structured expectations and remain readable in Git.
 
+A case has an `id`, a `category`, a `question` and only the expectations meaningful for it: `retrievalDocumentIds`,
+`expectedTools`, `expectedLlmCallCount`, `requiredFacts` (exact values), `requiredConcepts` and `forbiddenConcepts`
+(named lists of case-insensitive alternative patterns), `rawPiiValues` and `expectedPlaceholders`.
+
 ## 71. Initial Evaluation Set
 
 The initial suite shall contain at least these 10 scenarios:
@@ -1934,6 +1947,14 @@ The initial suite shall contain at least these 10 scenarios:
 8. PII masking.
 9. Unsupported future information.
 10. Missing product knowledge.
+
+A scenario's question shall explicitly ask for every fact its expectations require. For example, the FAQ scenario
+asks for the relevant operational conditions: how often the due date can be changed, which dates are available,
+whether there is a fee, and how far in advance the change must be requested.
+
+The combined scenario is one advisor question that explicitly requires both sources: deterministic contract-specific
+facts (a contract tool) and a product rule (product documentation). A question that product documentation alone
+can answer does not qualify, because it would not justify the tool call.
 
 ## 72. Deterministic Assertions
 
@@ -1959,9 +1980,17 @@ RAG evaluation shall distinguish between:
 1. retrieval quality,
 2. generation quality.
 
+Retrieval quality is evaluated by calling `KnowledgeRetriever.retrieve` with the masked question and asserting the
+expected source documents. Generation quality is evaluated on the final answer of the full chat flow.
+
 ## 75. Tool Selection Evaluation
 
 Tool selection shall be verified explicitly, including expected tool and invocation count.
+
+Executed tools are taken from the persisted `tool_invocation` records of the advisor interaction (not from the answer
+text) and must match the expected tools exactly; the number of model calls is taken from `ai_interaction`.
+All records must be correlated with the single advisor interaction of the case. Raw PII values of a case must not
+appear in any persisted prompt, response, advisor message or final answer.
 
 ## 76. Stability
 
@@ -2006,6 +2035,9 @@ natural-language quality
 LLM-as-a-judge
     -> optional supporting mechanism
 ```
+
+The MVP uses no LLM-as-a-judge. Natural-language answers are checked with exact required facts and tolerant
+required/forbidden concepts; only presentation (markdown emphasis, thousands separators) is normalized.
 
 ## 81. MVP Implementation Scope
 
