@@ -723,9 +723,9 @@ Supported contract statuses shall initially include:
 `InstallmentCalculationResult` shall contain:
 
 - monthly installment,
-- principal amount,
-- repayment period,
-- annual interest rate.
+- total repayment (monthly installment multiplied by the repayment period in months).
+
+The input values are not repeated in the result; callers already hold the request.
 
 Financial values shall use decimal arithmetic appropriate for monetary calculations.
 

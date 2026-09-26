@@ -97,19 +97,64 @@ class CreditMcpToolsTest {
 
     @Test
     void shouldReportInvalidEligibilityInputAsToolError() {
-        CallToolResult result = creditMcpTools.toolSpecifications(McpJsonDefaults.getMapper())
+        CallToolResult result = callTool(CreditMcpTools.CHECK_ELIGIBILITY,
+                Map.of("monthlyIncome", 0, "existingMonthlyObligations", 0, "requestedLoanAmount", 1000));
+
+        assertToolError(result, "monthlyIncome must be greater than zero");
+    }
+
+    @Test
+    void shouldLeaveZeroMonthsToTheSharedCalculatorValidation() {
+        CallToolResult result = callTool(CreditMcpTools.CALCULATE_INSTALLMENT,
+                Map.of("principal", 100000, "annualInterestRate", 8.5, "months", 0));
+
+        assertToolError(result, "months must be greater than zero");
+    }
+
+    @Test
+    void shouldRejectMonthsAboveJavaIntRangeInsteadOfWrapping() {
+        CallToolResult result = callTool(CreditMcpTools.CALCULATE_INSTALLMENT,
+                Map.of("principal", 100000, "annualInterestRate", 8.5, "months", 2147483648L));
+
+        assertToolError(result, "months must be an integer between -2147483648 and 2147483647");
+    }
+
+    @Test
+    void shouldRejectMonthsThatWouldTruncateToPlausibleValue() {
+        long wouldTruncateToSixtyMonths = (1L << 32) + 60;
+
+        CallToolResult result = callTool(CreditMcpTools.CALCULATE_INSTALLMENT,
+                Map.of("principal", 100000, "annualInterestRate", 8.5, "months", wouldTruncateToSixtyMonths));
+
+        assertThat((int) wouldTruncateToSixtyMonths).as("what intValue() used to pass on").isEqualTo(60);
+        assertToolError(result, "months must be an integer between -2147483648 and 2147483647");
+    }
+
+    @Test
+    void shouldRejectFractionalMonths() {
+        CallToolResult result = callTool(CreditMcpTools.CALCULATE_INSTALLMENT,
+                Map.of("principal", 100000, "annualInterestRate", 8.5, "months", 60.5));
+
+        assertToolError(result, "months must be an integer between -2147483648 and 2147483647");
+    }
+
+    /**
+     * Invokes the registered tool handler, including the adapter's mapping of invalid input to tool errors.
+     */
+    private CallToolResult callTool(String toolName, Map<String, Object> arguments) {
+        return creditMcpTools.toolSpecifications(McpJsonDefaults.getMapper())
                 .stream()
-                .filter(specification -> specification.tool().name().equals(CreditMcpTools.CHECK_ELIGIBILITY))
+                .filter(specification -> specification.tool().name().equals(toolName))
                 .findFirst()
                 .orElseThrow()
                 .callHandler()
-                .apply(null, new CallToolRequest(
-                        CreditMcpTools.CHECK_ELIGIBILITY,
-                        Map.of("monthlyIncome", 0, "existingMonthlyObligations", 0, "requestedLoanAmount", 1000),
-                        null));
+                .apply(null, new CallToolRequest(toolName, arguments, null));
+    }
 
+    private void assertToolError(CallToolResult result, String expectedMessage) {
         assertThat(result.isError()).isTrue();
+        assertThat(result.structuredContent()).isNull();
         assertThat(result.content()).singleElement()
-                .isInstanceOfSatisfying(TextContent.class, text -> assertThat(text.text()).contains("monthlyIncome"));
+                .isInstanceOfSatisfying(TextContent.class, text -> assertThat(text.text()).isEqualTo(expectedMessage));
     }
 }

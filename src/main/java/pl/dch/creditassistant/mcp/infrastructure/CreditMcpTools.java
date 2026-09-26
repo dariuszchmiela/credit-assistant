@@ -67,7 +67,12 @@ class CreditMcpTools {
               "properties": {
                 "principal": { "type": "number", "description": "principal amount of the credit" },
                 "annualInterestRate": { "type": "number", "description": "annual interest rate in percent, for example 8.5" },
-                "months": { "type": "integer", "description": "repayment period in months" }
+                "months": {
+                  "type": "integer",
+                  "minimum": -2147483648,
+                  "maximum": 2147483647,
+                  "description": "repayment period in months (bounds are the Java int range, not a product limit)"
+                }
               },
               "required": ["principal", "annualInterestRate", "months"]
             }
@@ -151,7 +156,7 @@ class CreditMcpTools {
         InstallmentCalculation calculation = installmentCalculator.calculate(
                 decimalArgument(arguments, PRINCIPAL),
                 decimalArgument(arguments, ANNUAL_INTEREST_RATE),
-                ((Number) arguments.get(MONTHS)).intValue()
+                integerArgument(arguments, MONTHS)
         );
 
         return structured(calculation);
@@ -215,5 +220,23 @@ class CreditMcpTools {
         Object value = arguments.get(name);
 
         return value == null ? null : new BigDecimal(value.toString());
+    }
+
+    /**
+     * Converts a JSON integer exactly to a Java {@code int}; values with a fraction or outside the {@code int}
+     * range are rejected instead of being truncated. Business limits stay in the credit services.
+     */
+    private int integerArgument(Map<String, Object> arguments, String name) {
+        Object value = arguments.get(name);
+        if (value == null) {
+            throw new IllegalArgumentException(name + " is required");
+        }
+
+        try {
+            return new BigDecimal(value.toString()).intValueExact();
+        } catch (ArithmeticException exception) {
+            throw new IllegalArgumentException(name + " must be an integer between "
+                    + Integer.MIN_VALUE + " and " + Integer.MAX_VALUE, exception);
+        }
     }
 }

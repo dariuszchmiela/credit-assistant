@@ -153,6 +153,22 @@ class McpServerProtocolIntegrationTest {
     }
 
     @Test
+    void shouldRejectMonthsOutsideJavaIntRangeOverTheMcpProtocol() {
+        mcpClient.initialize();
+        long wouldTruncateToSixtyMonths = (1L << 32) + 60;
+
+        CallToolResult result = mcpClient.callTool(new CallToolRequest(
+                "calculateInstallment",
+                Map.of("principal", 100000, "annualInterestRate", 8.5, "months", wouldTruncateToSixtyMonths),
+                null));
+
+        assertThat(result.isError()).isTrue();
+        assertThat(result.structuredContent()).as("no installment may be calculated").isNull();
+        assertThat(result.content()).singleElement()
+                .isInstanceOfSatisfying(TextContent.class, text -> assertThat(text.text()).contains("months"));
+    }
+
+    @Test
     void shouldAcceptConfiguredLocalhostHostAndOrigin() throws IOException {
         int status = postInitialize("localhost:" + port, "http://localhost:" + port);
 
