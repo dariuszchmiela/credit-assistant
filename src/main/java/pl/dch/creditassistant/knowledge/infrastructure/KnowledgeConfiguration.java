@@ -48,7 +48,7 @@ class KnowledgeConfiguration {
     ) {
         KnowledgeProperties.Ingestion ingestion = properties.ingestion();
 
-        return new KnowledgeIngestionService(
+        return new LangChain4jKnowledgeIngestionService(
                 embeddingModel,
                 productKnowledgeEmbeddingStore,
                 DocumentSplitters.recursive(ingestion.chunkSize(), ingestion.chunkOverlap())
@@ -63,7 +63,7 @@ class KnowledgeConfiguration {
     ) {
         KnowledgeProperties.Retrieval retrieval = properties.retrieval();
 
-        return new KnowledgeRetriever(
+        return new LangChain4jKnowledgeRetriever(
                 embeddingModel,
                 productKnowledgeEmbeddingStore,
                 retrieval.maxResults(),

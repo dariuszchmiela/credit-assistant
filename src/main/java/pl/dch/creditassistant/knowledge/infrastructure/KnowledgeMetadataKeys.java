@@ -1,4 +1,4 @@
-package pl.dch.creditassistant.knowledge.application;
+package pl.dch.creditassistant.knowledge.infrastructure;
 
 final class KnowledgeMetadataKeys {
 

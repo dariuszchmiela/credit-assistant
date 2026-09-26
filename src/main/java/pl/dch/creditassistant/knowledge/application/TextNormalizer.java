@@ -5,7 +5,7 @@ import java.util.regex.Pattern;
 /**
  * AC-005 / spec §24: normalizes layout only; never rewrites the wording of product rules.
  */
-final class TextNormalizer {
+public final class TextNormalizer {
 
     private static final Pattern WINDOWS_OR_OLD_MAC_LINE_ENDING = Pattern.compile("\r\n?");
     private static final Pattern REPEATED_INLINE_WHITESPACE = Pattern.compile("[ \t]+");
@@ -16,7 +16,7 @@ final class TextNormalizer {
     private static final String SINGLE_SPACE = " ";
     private static final String PARAGRAPH_BREAK = "\n\n";
 
-    String normalize(String text) {
+    public String normalize(String text) {
         String normalized = WINDOWS_OR_OLD_MAC_LINE_ENDING.matcher(text).replaceAll(LINE_FEED);
         normalized = REPEATED_INLINE_WHITESPACE.matcher(normalized).replaceAll(SINGLE_SPACE);
         normalized = TRAILING_WHITESPACE.matcher(normalized).replaceAll("");

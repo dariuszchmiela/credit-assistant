@@ -1,0 +1,77 @@
+package pl.dch.creditassistant.architecture;
+
+import com.tngtech.archunit.core.importer.ImportOption;
+import com.tngtech.archunit.junit.AnalyzeClasses;
+import com.tngtech.archunit.junit.ArchTest;
+import com.tngtech.archunit.lang.ArchRule;
+
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+
+/**
+ * SPEC 19, AC-002, AC-007, AC-009: executable module boundaries of the production code.
+ */
+@AnalyzeClasses(packages = "pl.dch.creditassistant", importOptions = ImportOption.DoNotIncludeTests.class)
+class ArchitectureTest {
+
+    private static final String[] AI_FRAMEWORK_PACKAGES = {
+            "dev.langchain4j..",
+            "io.modelcontextprotocol..",
+            "org.springframework.ai.."
+    };
+
+    private static final String[] PERSISTENCE_FRAMEWORK_PACKAGES = {
+            "com.pgvector..",
+            "org.postgresql..",
+            "org.springframework.jdbc.."
+    };
+
+    @ArchTest
+    static final ArchRule creditDoesNotDependOnAiOrPersistenceFrameworks = noClasses()
+            .that().resideInAPackage("pl.dch.creditassistant.credit..")
+            .should().dependOnClassesThat().resideInAnyPackage(AI_FRAMEWORK_PACKAGES)
+            .orShould().dependOnClassesThat().resideInAnyPackage(PERSISTENCE_FRAMEWORK_PACKAGES)
+            .because("credit business rules must stay independent of AI and persistence frameworks (AC-002)");
+
+    @ArchTest
+    static final ArchRule creditDoesNotDependOnOtherModules = noClasses()
+            .that().resideInAPackage("pl.dch.creditassistant.credit..")
+            .should().dependOnClassesThat().resideInAnyPackage(
+                    "pl.dch.creditassistant.chat..",
+                    "pl.dch.creditassistant.knowledge..",
+                    "pl.dch.creditassistant.mcp..",
+                    "pl.dch.creditassistant.privacy..",
+                    "pl.dch.creditassistant.observability.."
+            )
+            .because("other modules depend on credit, never the other way round (SPEC 16)");
+
+    @ArchTest
+    static final ArchRule knowledgeApplicationAndDomainDoNotDependOnAiOrPersistenceFrameworks = noClasses()
+            .that().resideInAnyPackage(
+                    "pl.dch.creditassistant.knowledge.application..",
+                    "pl.dch.creditassistant.knowledge.domain.."
+            )
+            .should().dependOnClassesThat().resideInAnyPackage(AI_FRAMEWORK_PACKAGES)
+            .orShould().dependOnClassesThat().resideInAnyPackage(PERSISTENCE_FRAMEWORK_PACKAGES)
+            .because("LangChain4j embeddings and pgvector belong to knowledge.infrastructure only (AC-007)");
+
+    @ArchTest
+    static final ArchRule chatUsesKnowledgeApplicationApiOnly = noClasses()
+            .that().resideInAPackage("pl.dch.creditassistant.chat..")
+            .should().dependOnClassesThat().resideInAPackage("pl.dch.creditassistant.knowledge.infrastructure..")
+            .orShould().dependOnClassesThat().resideInAnyPackage(PERSISTENCE_FRAMEWORK_PACKAGES)
+            .because("chat retrieves product knowledge through the knowledge application API, not vector-store details");
+
+    @ArchTest
+    static final ArchRule domainIsFreeOfFrameworks = noClasses()
+            .that().resideInAPackage("pl.dch.creditassistant..domain..")
+            .should().dependOnClassesThat().resideInAnyPackage("org.springframework..", "jakarta..")
+            .orShould().dependOnClassesThat().resideInAnyPackage(AI_FRAMEWORK_PACKAGES)
+            .orShould().dependOnClassesThat().resideInAnyPackage(PERSISTENCE_FRAMEWORK_PACKAGES)
+            .because("domain models are plain Java (AC-009)");
+
+    @ArchTest
+    static final ArchRule domainDoesNotDependOnInfrastructure = noClasses()
+            .that().resideInAPackage("pl.dch.creditassistant..domain..")
+            .should().dependOnClassesThat().resideInAPackage("pl.dch.creditassistant..infrastructure..")
+            .because("infrastructure adapts the domain, not the other way round (SPEC 19)");
+}

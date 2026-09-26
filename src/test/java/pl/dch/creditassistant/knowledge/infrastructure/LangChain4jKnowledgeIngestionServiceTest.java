@@ -1,4 +1,4 @@
-package pl.dch.creditassistant.knowledge.application;
+package pl.dch.creditassistant.knowledge.infrastructure;
 
 import dev.langchain4j.data.document.splitter.DocumentSplitters;
 import dev.langchain4j.data.segment.TextSegment;
@@ -6,6 +6,7 @@ import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.embedding.onnx.allminilml6v2q.AllMiniLmL6V2QuantizedEmbeddingModel;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import org.junit.jupiter.api.Test;
+import pl.dch.creditassistant.knowledge.application.KnowledgeRetriever;
 import pl.dch.creditassistant.knowledge.domain.KnowledgeChunk;
 import pl.dch.creditassistant.knowledge.domain.KnowledgeDocument;
 import pl.dch.creditassistant.knowledge.domain.KnowledgeDocumentType;
@@ -18,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * AC-005 ingestion: chunking, metadata propagation and re-ingestion without duplicates.
  * Uses the real local embedding model; pgvector persistence is covered by the Testcontainers integration test.
  */
-class KnowledgeIngestionServiceTest {
+class LangChain4jKnowledgeIngestionServiceTest {
 
     private static final int CHUNK_SIZE = 200;
     private static final int CHUNK_OVERLAP = 0;
@@ -41,12 +42,12 @@ class KnowledgeIngestionServiceTest {
 
     private final EmbeddingModel embeddingModel = new AllMiniLmL6V2QuantizedEmbeddingModel();
     private final InMemoryEmbeddingStore<TextSegment> embeddingStore = new InMemoryEmbeddingStore<>();
-    private final KnowledgeIngestionService ingestionService = new KnowledgeIngestionService(
+    private final LangChain4jKnowledgeIngestionService ingestionService = new LangChain4jKnowledgeIngestionService(
             embeddingModel,
             embeddingStore,
             DocumentSplitters.recursive(CHUNK_SIZE, CHUNK_OVERLAP)
     );
-    private final KnowledgeRetriever retriever = new KnowledgeRetriever(embeddingModel, embeddingStore, 10, 0.0);
+    private final KnowledgeRetriever retriever = new LangChain4jKnowledgeRetriever(embeddingModel, embeddingStore, 10, 0.0);
 
     @Test
     void shouldSplitDocumentIntoSectionChunksCarryingDocumentMetadata() {
