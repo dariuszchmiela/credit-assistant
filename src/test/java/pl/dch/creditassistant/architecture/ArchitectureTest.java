@@ -98,6 +98,29 @@ class ArchitectureTest {
             .because("chat uses privacy, never the other way round (SPEC 16)");
 
     @ArchTest
+    static final ArchRule observabilityBusinessLayersDoNotDependOnAiOrPersistenceFrameworks = noClasses()
+            .that().resideInAnyPackage(
+                    "pl.dch.creditassistant.observability.application..",
+                    "pl.dch.creditassistant.observability.domain.."
+            )
+            .should().dependOnClassesThat().resideInAnyPackage(AI_FRAMEWORK_PACKAGES)
+            .orShould().dependOnClassesThat().resideInAnyPackage(PERSISTENCE_FRAMEWORK_PACKAGES)
+            .orShould().dependOnClassesThat().resideInAnyPackage("java.sql..", "org.flywaydb..")
+            .because("the LangChain4j listener lives in chat.infrastructure and JDBC in observability.infrastructure (AC-003, AC-004)");
+
+    @ArchTest
+    static final ArchRule observabilityDoesNotDependOnOtherModules = noClasses()
+            .that().resideInAPackage("pl.dch.creditassistant.observability..")
+            .should().dependOnClassesThat().resideInAnyPackage(
+                    "pl.dch.creditassistant.chat..",
+                    "pl.dch.creditassistant.credit..",
+                    "pl.dch.creditassistant.knowledge..",
+                    "pl.dch.creditassistant.mcp..",
+                    "pl.dch.creditassistant.privacy.."
+            )
+            .because("chat feeds observability with already masked data, never the other way round (SPEC 16, rule 9)");
+
+    @ArchTest
     static final ArchRule domainIsFreeOfFrameworks = noClasses()
             .that().resideInAPackage("pl.dch.creditassistant..domain..")
             .should().dependOnClassesThat().resideInAnyPackage("org.springframework..", "jakarta..")

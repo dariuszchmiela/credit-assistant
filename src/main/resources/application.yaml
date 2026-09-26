@@ -5,6 +5,11 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:credit_assistant}
     username: ${DB_USERNAME:credit_assistant}
     password: ${DB_PASSWORD:credit_assistant}
+  flyway:
+    # Existing local databases already contain the pgvector table managed by LangChain4j; baseline them
+    # below V1 so that V1 and later migrations still run.
+    baseline-on-migrate: true
+    baseline-version: 0
 
 langchain4j:
   ollama:
@@ -33,3 +38,9 @@ mcp:
     # Host/Origin validation against DNS rebinding; "<host>:*" allows any port. Comma-separated in env variables.
     allowed-hosts: ${MCP_ALLOWED_HOSTS:localhost:*,127.0.0.1:*}
     allowed-origins: ${MCP_ALLOWED_ORIGINS:http://localhost:*,http://127.0.0.1:*}
+
+observability:
+  cost:
+    # Estimated model prices per one million tokens, without currency. 0 fits local Ollama (no API charge).
+    input-per-million-tokens: ${LLM_INPUT_COST_PER_MILLION_TOKENS:0}
+    output-per-million-tokens: ${LLM_OUTPUT_COST_PER_MILLION_TOKENS:0}

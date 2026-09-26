@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import pl.dch.creditassistant.chat.application.ChatInvocationParameters;
 import pl.dch.creditassistant.credit.contract.application.ContractStatusService;
 import pl.dch.creditassistant.credit.contract.domain.CreditContract;
+import pl.dch.creditassistant.observability.application.ToolInvocationRecorder;
 import pl.dch.creditassistant.privacy.domain.PiiCategory;
 
 import java.time.LocalDate;
@@ -20,14 +21,17 @@ import java.util.Optional;
 @Component
 public class ContractTools {
 
+    private static final String TOOL_NAME = "getContractStatus";
     private static final String CONTRACT_NOT_FOUND = "NOT_FOUND";
     private static final String INVALID_CONTRACT_REFERENCE = "INVALID_CONTRACT_REFERENCE";
     private static final String NO_NEXT_PAYMENT = "NONE";
 
     private final ContractStatusService contractStatusService;
+    private final ToolInvocationRecorder toolInvocationRecorder;
 
-    public ContractTools(ContractStatusService contractStatusService) {
+    public ContractTools(ContractStatusService contractStatusService, ToolInvocationRecorder toolInvocationRecorder) {
         this.contractStatusService = contractStatusService;
+        this.toolInvocationRecorder = toolInvocationRecorder;
     }
 
     @Tool("Returns the current status, outstanding principal and next payment date of a credit contract "
@@ -37,6 +41,14 @@ public class ContractTools {
             String contractReference,
             InvocationParameters invocationParameters
     ) {
+        return toolInvocationRecorder.execute(
+                ChatInvocationParameters.interactionId(invocationParameters),
+                TOOL_NAME,
+                () -> findContract(contractReference, invocationParameters)
+        );
+    }
+
+    private String findContract(String contractReference, InvocationParameters invocationParameters) {
         Optional<String> contractNumber = ChatInvocationParameters.protectedValues(invocationParameters)
                 .originalOf(PiiCategory.CONTRACT_NUMBER, String.valueOf(contractReference).strip());
 

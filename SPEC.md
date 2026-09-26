@@ -191,6 +191,19 @@ For every LLM interaction, the system shall persist observability data containin
 
 Observability failures shall not expose unmasked PII.
 
+Implementation decisions:
+
+- An LLM interaction is one physical chat model call, observed by a LangChain4j `ChatModelListener`.
+  A request that involves a tool call therefore produces one record per model call (for example two).
+- Each record also stores the names of the tools requested in that model response, never the tool arguments.
+- The recorded prompt is the last user message actually sent to the model (already masked, possibly RAG-augmented).
+  Prompt and response are masked again before persistence as defence in depth.
+- Token counts come from the response metadata. If the provider does not report them, token counts and cost are
+  stored as unknown (`NULL`), not as zero.
+- A failed model call is recorded with status `ERROR` and the exception type only; it has no response, token counts
+  or cost, and the provider's error message is not stored.
+- Failure to persist a record is logged without content and never fails the chat request.
+
 ### FR-009 — Evaluation set
 
 The repository shall contain a fixed evaluation dataset with at least 10 representative questions.
@@ -954,9 +967,11 @@ Conceptual API:
 ```java
 public interface AiInteractionRepository {
 
-    AiInteraction save(AiInteraction interaction);
+    void save(AiInteraction interaction);
 }
 ```
+
+The interaction identifier is generated in the domain (UUID), so `save` does not need to return the interaction.
 
 The application shall persist only masked prompt and response content.
 
@@ -1677,6 +1692,14 @@ The system shall distinguish between:
 - individual LLM calls,
 - individual tool invocations.
 
+Implemented model (all in the `observability` module):
+
+| Concept | Domain class | Table | Meaning |
+|---|---|---|---|
+| Advisor interaction | `AdvisorInteraction` | `advisor_interaction` | one advisor request (`POST /api/chat`) |
+| LLM call | `AiInteraction` | `ai_interaction` | one physical chat model call; the class keeps its FR-008 name |
+| Tool invocation | `ToolInvocation` | `tool_invocation` | one actual execution of a Java agent tool |
+
 ## 52. Advisor Interaction
 
 An `AdvisorInteraction` shall contain at least:
@@ -1695,6 +1718,16 @@ Supported initial statuses:
 - `FAILED`,
 - `REJECTED_PRIVACY`.
 
+Lifecycle (owned by the chat application service):
+
+- The interaction is persisted when the request starts, after successful masking, so that LLM calls and tool
+  invocations can reference it by foreign key. While it is running, completion timestamp, status and duration are
+  empty (`NULL`); there is no separate in-progress status.
+- On success it is updated with the final model answer (masked again before persistence) and `SUCCESS`.
+- If the model call fails it is updated to `FAILED` without a final response, and the original exception is rethrown.
+- If masking itself fails, the model is not called and the interaction is stored as `REJECTED_PRIVACY` without any
+  advisor message.
+
 ## 53. LLM Call
 
 Each external model invocation shall be represented separately and contain at least:
@@ -1710,6 +1743,9 @@ Each external model invocation shall be represented separately and contain at le
 - execution duration,
 - completion status.
 
+LLM calls also record the names of the tools the model **requested** in its response. This is distinct from
+tool invocations, which record tools that were **actually executed**.
+
 ## 54. Tool Invocation
 
 Each agent tool invocation shall be observable.
@@ -1724,9 +1760,26 @@ checkEligibility
 
 Raw sensitive arguments shall not be persisted.
 
+Each execution of a LangChain4j tool adapter is recorded with tool invocation identifier, advisor interaction
+identifier, tool name, start timestamp, duration and status (`SUCCESS` or `ERROR`). Tool arguments and results are
+not persisted. A failing tool is recorded as `ERROR` and its exception is propagated unchanged. MCP tool calls are not
+part of an advisor interaction and are not recorded.
+
 ## 55. Correlation
 
 Application logs, LLM calls and tool invocations shall be correlated using generated technical identifiers such as `interactionId`.
+
+Implementation:
+
+- The chat application service generates one UUID `interactionId` per advisor request.
+- It is passed in LangChain4j `InvocationParameters` (next to the protected values), which tools receive and which
+  are not part of the prompt or tool schemas.
+- LangChain4j 1.20 AI services do not pass the invocation context to `ChatModelListener`s. The RAG retrieval
+  augmentor therefore stamps the `interactionId` onto the (augmented) user message as a message attribute. That
+  message is part of every model call of the request, and user message attributes are not sent to the model provider.
+  The chat model listener reads the identifier from there.
+- Lifecycle logs contain the `interactionId` (started, completed with status, failed, rejected) and record identifiers,
+  never message contents.
 
 ## 56. Token Usage
 
@@ -1743,6 +1796,16 @@ Request cost shall be calculated deterministically from token usage and configur
 Model pricing shall be externalized through typed configuration.
 
 Configured costs are estimates rather than billing-authoritative values.
+
+Prices are configured per one million tokens, separately for input and output tokens
+(`observability.cost.input-per-million-tokens`, `observability.cost.output-per-million-tokens`), without a currency.
+The default is 0, matching a local Ollama model without API charges.
+
+```text
+estimated cost = inputTokens × inputPrice / 1 000 000 + outputTokens × outputPrice / 1 000 000
+```
+
+The result is rounded half-up to 10 decimal places. Negative prices are rejected.
 
 ## 59. Monetary Precision
 
@@ -1762,6 +1825,19 @@ tool_invocation
 
 The exact schema shall be defined during implementation.
 
+Implemented schema, created by the Flyway migration `V1__create_ai_interaction.sql`:
+
+```text
+advisor_interaction (interaction_id PK, started_at, completed_at, masked_advisor_message,
+                     masked_final_response, status, duration_millis)
+    1 ─── N  ai_interaction  (id PK, advisor_interaction_id FK, one row per LLM call - the conceptual llm_call,
+                              requested tool names in a tool_names text array)
+    1 ─── N  tool_invocation (tool_invocation_id PK, advisor_interaction_id FK NOT NULL, tool_name,
+                              started_at, duration_millis, status)
+```
+
+`ai_interaction.advisor_interaction_id` is nullable for model calls made outside an advisor chat.
+
 ## 61. Persistence Failure
 
 Observability persistence failure shall not silently alter deterministic business outcomes.
@@ -1775,6 +1851,9 @@ Stored prompts and responses shall contain masked content only.
 ## 63. Tool Observability
 
 Tool execution timing shall be measured independently from model execution timing.
+
+The duration is measured with a monotonic clock around the Java tool adapter execution only, so it contains neither
+the preceding nor the following model call.
 
 ## 64. Logging
 
@@ -1792,6 +1871,8 @@ The data model should support answering:
 - estimated cost of the evaluation set,
 - interaction failures,
 - model time versus tool execution time.
+
+These are answered by grouping `ai_interaction` and `tool_invocation` rows by `advisor_interaction_id`.
 
 ## 66. Observability Test Strategy
 

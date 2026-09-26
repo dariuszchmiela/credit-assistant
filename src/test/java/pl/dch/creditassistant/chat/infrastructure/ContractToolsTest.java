@@ -9,6 +9,8 @@ import pl.dch.creditassistant.chat.application.ChatService;
 import pl.dch.creditassistant.chat.application.CreditAssistant;
 import pl.dch.creditassistant.credit.contract.application.ContractStatusService;
 import pl.dch.creditassistant.credit.contract.infrastructure.InMemoryContractRepository;
+import pl.dch.creditassistant.observability.application.AdvisorInteractionRecorder;
+import pl.dch.creditassistant.observability.application.ToolInvocationRecorder;
 import pl.dch.creditassistant.privacy.application.PiiMasker;
 
 import java.util.List;
@@ -22,7 +24,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ContractToolsTest {
 
     private final ContractTools contractTools =
-            new ContractTools(new ContractStatusService(new InMemoryContractRepository()));
+            new ContractTools(new ContractStatusService(new InMemoryContractRepository()),
+                    new ToolInvocationRecorder(invocation -> {
+                    }));
 
     @Test
     void shouldResolvePlaceholderAndDescribeContractWithoutRawNumber() {
@@ -110,7 +114,8 @@ class ContractToolsTest {
             return "";
         };
 
-        new ChatService(new PiiMasker(), capturingAssistant).chat(rawMessage);
+        new ChatService(new PiiMasker(), capturingAssistant, new AdvisorInteractionRecorder(interaction -> {
+        })).chat(rawMessage);
 
         assertThat(ChatInvocationParameters.protectedValues(captured[0])).isNotNull();
         return captured[0];
