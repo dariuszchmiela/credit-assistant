@@ -866,6 +866,15 @@ Responsibilities:
 
 The implementation shall use Java monetary-safe decimal arithmetic.
 
+Input validation (rejected with `IllegalArgumentException`, for every adapter):
+
+- principal shall be greater than zero,
+- annual interest rate shall not be negative,
+- repayment period in months shall be greater than zero.
+
+A 0% annual interest rate is valid: the monthly installment is the principal divided by the number of months,
+rounded half-up to 2 decimal places.
+
 ### 11.3 Eligibility
 
 Conceptual API:
@@ -2013,6 +2022,20 @@ MCP contracts shall expose structured values rather than preformatted conversati
 The MVP shall support one MCP transport only.
 
 The concrete Java MCP server implementation and transport shall be selected during implementation based on current documentation.
+
+Selected implementation:
+
+- the official MCP Java SDK (`io.modelcontextprotocol.sdk:mcp`), without an additional AI framework,
+- the Streamable HTTP transport, served as a servlet by the application's embedded web server,
+- endpoint path configured by `mcp.server.endpoint` (default `/mcp`), on the same HTTP port as the REST API.
+
+Each tool declares an input schema and an output schema and returns structured content.
+An unknown contract is a regular `getContractStatus` result with `found = false`, not a protocol error.
+Invalid business input is reported as a tool error result (`isError = true`).
+
+The HTTP transport validates `Host` and `Origin` headers with the SDK's `DefaultServerTransportSecurityValidator`
+(DNS-rebinding protection). Allowed values are configured by `mcp.server.allowed-hosts` and
+`mcp.server.allowed-origins` and default to localhost only. Authentication is not part of the MVP.
 
 ## 87. MCP Test
 

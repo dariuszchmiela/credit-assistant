@@ -70,6 +70,16 @@ class ArchitectureTest {
             .because("chat retrieves product knowledge through the knowledge application API, not vector-store details");
 
     @ArchTest
+    static final ArchRule mcpAdaptersDelegateToCreditApplicationServices = noClasses()
+            .that().resideInAPackage("pl.dch.creditassistant.mcp..")
+            .should().dependOnClassesThat().resideInAnyPackage(
+                    "pl.dch.creditassistant.chat..",
+                    "pl.dch.creditassistant.credit..infrastructure..",
+                    "dev.langchain4j.."
+            )
+            .because("MCP and LangChain4j tools are independent adapters over the same credit application services (FR-006, SPEC 19)");
+
+    @ArchTest
     static final ArchRule domainIsFreeOfFrameworks = noClasses()
             .that().resideInAPackage("pl.dch.creditassistant..domain..")
             .should().dependOnClassesThat().resideInAnyPackage("org.springframework..", "jakarta..")

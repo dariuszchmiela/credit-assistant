@@ -23,3 +23,13 @@ knowledge:
   retrieval:
     max-results: 3
     min-relevance-score: 0.7
+
+mcp:
+  server:
+    # MCP Streamable HTTP endpoint, served on the application's HTTP port next to /api/chat.
+    endpoint: ${MCP_ENDPOINT:/mcp}
+    name: credit-assistant
+    version: 0.0.1
+    # Host/Origin validation against DNS rebinding; "<host>:*" allows any port. Comma-separated in env variables.
+    allowed-hosts: ${MCP_ALLOWED_HOSTS:localhost:*,127.0.0.1:*}
+    allowed-origins: ${MCP_ALLOWED_ORIGINS:http://localhost:*,http://127.0.0.1:*}
