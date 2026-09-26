@@ -634,7 +634,7 @@ The assistant shall not predict or invent a future offer.
 
 **Example external prompt representation:**
 
-> Check contract [CONTRACT_NUMBER] for customer PESEL [PESEL].
+> Check contract [CONTRACT_NUMBER_1] for customer PESEL [PESEL_1].
 
 **Expected behavior:**
 
@@ -902,9 +902,16 @@ Conceptual API:
 ```java
 public interface PiiMasker {
 
-    MaskedText mask(String text);
+    PiiMaskingResult mask(String text);
 }
 ```
+
+`PiiMaskingResult` contains:
+
+- `MaskedText`, which is safe to send to an LLM, log or persist,
+- `ProtectedValues`, the internal placeholder-to-original mapping, used only inside the trusted boundary.
+  Its string representation reveals no values.
+  It retains only values that deterministic internal tools must resolve; currently contract numbers only.
 
 `MaskedText` shall contain at least:
 
@@ -1504,30 +1511,44 @@ The privacy module shall detect PESEL-like identifiers.
 
 Initial detection shall support:
 
-- exactly 11 consecutive digits,
-- validation using the PESEL checksum where practical.
+- exactly 11 consecutive digits that are not part of a longer digit sequence.
 
-Detected values shall be replaced with:
+The PESEL checksum is deliberately not validated, so synthetic or mistyped PESEL numbers are masked as well.
+
+PESEL masking is not reversible in the MVP: no tool needs the original value, so it is not retained after masking.
+
+Detected values shall be replaced with numbered placeholders:
 
 ```text
-[PESEL]
+[PESEL_1]
 ```
 
 ### 39.2 Contract number
 
 The sample application's contract identifiers shall use a defined format.
 
-Example:
+Supported formats (case-insensitive, standalone tokens):
 
 ```text
-CR-2026-000123
+CTR-1001          CTR-<digits>, used by the sample contract data
+CR-2026-000123    CR-<year>-<6 digits>
 ```
 
-Detected contract identifiers shall be replaced with:
+Syntactically valid numbers are masked whether or not the contract exists.
+
+Detected contract numbers are normalized to their canonical upper-case form (for example `ctr-1001` becomes `CTR-1001`)
+before they are retained for internal resolution. Values that differ only in letter case share one placeholder.
+
+Detected contract identifiers shall be replaced with numbered placeholders:
 
 ```text
-[CONTRACT_NUMBER]
+[CONTRACT_NUMBER_1]
 ```
+
+### 39.3 Placeholder numbering
+
+Placeholders are numbered per category, starting at 1 for each input, in order of first appearance.
+Repeated occurrences of the same value use the same placeholder. Placeholders never contain the original value.
 
 ## 40. Masking Result
 
@@ -1560,6 +1581,16 @@ The system shall not rely on the external LLM to reconstruct masked identifiers.
 When tool calling requires sensitive identifiers, the application shall use trusted internal state to resolve tool arguments.
 
 The exact mechanism shall be selected during implementation after validating current LangChain4j capabilities.
+
+Selected mechanism:
+
+- the chat application service masks the advisor message and passes only the masked text to the AI service,
+- `ProtectedValues` travel in LangChain4j `InvocationParameters`, which are not part of the prompt or the tool schema,
+- `getContractStatus` receives a placeholder such as `[CONTRACT_NUMBER_1]`, resolves it inside Java and queries the credit service,
+- the tool result identifies the contract by the same placeholder, so raw contract numbers never reach the LLM,
+  including in the follow-up LLM call after tool execution,
+- a placeholder that is not part of the current invocation resolves to nothing (`INVALID_CONTRACT_REFERENCE`),
+- model answers keep the placeholders; original values are not restored into the response.
 
 ## 44. Prompt Logging
 

@@ -1,6 +1,8 @@
 package pl.dch.creditassistant.chat.application;
 
+import dev.langchain4j.invocation.InvocationParameters;
 import dev.langchain4j.service.SystemMessage;
+import dev.langchain4j.service.UserMessage;
 import dev.langchain4j.service.spring.AiService;
 
 @AiService
@@ -18,6 +20,11 @@ public interface CreditAssistant {
             has a particular status and never add explanations, causes or consequences that the tool did not return.
             Do not assume or invent a currency. If no currency is provided, return monetary values without a currency symbol.
 
+            Protected data:
+            - Placeholders such as [CONTRACT_NUMBER_1] or [PESEL_1] stand for protected personal data.
+            - Pass contract placeholders unchanged to getContractStatus.
+            - Never try to guess or reconstruct the protected values; refer to them by their placeholders.
+
             Sources of truth:
             - Tool results are authoritative for customer, contract and calculation facts.
             - Product documentation provided with the user message is authoritative for product rules.
@@ -26,5 +33,5 @@ public interface CreditAssistant {
               If the provided product documentation does not contain the answer, say that the available
               knowledge base does not contain enough information to answer, and do not guess.
             """)
-    String chat(String message);
+    String chat(@UserMessage String maskedMessage, InvocationParameters invocationParameters);
 }

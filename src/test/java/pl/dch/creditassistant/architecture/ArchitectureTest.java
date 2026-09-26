@@ -80,6 +80,24 @@ class ArchitectureTest {
             .because("MCP and LangChain4j tools are independent adapters over the same credit application services (FR-006, SPEC 19)");
 
     @ArchTest
+    static final ArchRule privacyDoesNotDependOnAiFrameworks = noClasses()
+            .that().resideInAPackage("pl.dch.creditassistant.privacy..")
+            .should().dependOnClassesThat().resideInAnyPackage(AI_FRAMEWORK_PACKAGES)
+            .because("PII masking is deterministic and must not depend on AI frameworks (SPEC 16, rule 8; SPEC 41)");
+
+    @ArchTest
+    static final ArchRule privacyDoesNotDependOnOtherModules = noClasses()
+            .that().resideInAPackage("pl.dch.creditassistant.privacy..")
+            .should().dependOnClassesThat().resideInAnyPackage(
+                    "pl.dch.creditassistant.chat..",
+                    "pl.dch.creditassistant.credit..",
+                    "pl.dch.creditassistant.knowledge..",
+                    "pl.dch.creditassistant.mcp..",
+                    "pl.dch.creditassistant.observability.."
+            )
+            .because("chat uses privacy, never the other way round (SPEC 16)");
+
+    @ArchTest
     static final ArchRule domainIsFreeOfFrameworks = noClasses()
             .that().resideInAPackage("pl.dch.creditassistant..domain..")
             .should().dependOnClassesThat().resideInAnyPackage("org.springframework..", "jakarta..")

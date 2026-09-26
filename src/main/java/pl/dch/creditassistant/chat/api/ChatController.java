@@ -5,21 +5,21 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import pl.dch.creditassistant.chat.application.CreditAssistant;
+import pl.dch.creditassistant.chat.application.ChatService;
 
 @RestController
 @RequestMapping("/api/chat")
 public class ChatController {
 
-    private final CreditAssistant creditAssistant;
+    private final ChatService chatService;
 
-    public ChatController(CreditAssistant creditAssistant) {
-        this.creditAssistant = creditAssistant;
+    public ChatController(ChatService chatService) {
+        this.chatService = chatService;
     }
 
     @PostMapping
     public ChatResponse chat(@Valid @RequestBody ChatRequest request) {
-        String answer = creditAssistant.chat(request.message());
+        String answer = chatService.chat(request.message());
 
         return new ChatResponse(answer);
     }
