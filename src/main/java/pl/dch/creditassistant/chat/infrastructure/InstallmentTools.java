@@ -18,15 +18,18 @@ public class InstallmentTools {
     }
 
     @Tool("Calculates the monthly installment and total repayment for a credit with equal monthly installments")
-    public InstallmentCalculation calculateInstallment(
+    public String calculateInstallment(
             @P("principal amount of the credit") BigDecimal principal,
             @P("annual interest rate in percent, for example 8.5") BigDecimal annualInterestRate,
             @P("repayment period in months") int months
     ) {
-        return installmentCalculator.calculate(
+        InstallmentCalculation calculation = installmentCalculator.calculate(
                 principal,
                 annualInterestRate,
                 months
         );
+
+        return "monthlyInstallment=" + calculation.monthlyInstallment().toPlainString()
+                + ", totalRepayment=" + calculation.totalRepayment().toPlainString();
     }
 }
