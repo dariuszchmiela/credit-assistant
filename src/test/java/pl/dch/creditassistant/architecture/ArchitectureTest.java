@@ -26,11 +26,19 @@ class ArchitectureTest {
     };
 
     @ArchTest
-    static final ArchRule creditDoesNotDependOnAiOrPersistenceFrameworks = noClasses()
+    static final ArchRule creditDoesNotDependOnAiFrameworks = noClasses()
             .that().resideInAPackage("pl.dch.creditassistant.credit..")
             .should().dependOnClassesThat().resideInAnyPackage(AI_FRAMEWORK_PACKAGES)
-            .orShould().dependOnClassesThat().resideInAnyPackage(PERSISTENCE_FRAMEWORK_PACKAGES)
-            .because("credit business rules must stay independent of AI and persistence frameworks (AC-002)");
+            .because("the whole credit module, adapters included, must stay independent of AI and MCP frameworks (AC-002)");
+
+    @ArchTest
+    static final ArchRule creditBusinessLayersDoNotDependOnPersistenceFrameworks = noClasses()
+            .that().resideInAnyPackage(
+                    "pl.dch.creditassistant.credit..domain..",
+                    "pl.dch.creditassistant.credit..application.."
+            )
+            .should().dependOnClassesThat().resideInAnyPackage(PERSISTENCE_FRAMEWORK_PACKAGES)
+            .because("persistence adapters belong in credit infrastructure; business layers use ports (AC-004, AC-007)");
 
     @ArchTest
     static final ArchRule creditDoesNotDependOnOtherModules = noClasses()
