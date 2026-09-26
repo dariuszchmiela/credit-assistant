@@ -198,9 +198,10 @@ InMemoryContractRepository
 It contains several deterministic test contracts:
 
 ```text
-CTR-1001 -> ACTIVE
-CTR-1002 -> CLOSED
-CTR-1003 -> OVERDUE
+CTR-1001 -> ACTIVE,    outstanding principal 85000.00, next payment 2026-10-15
+CTR-1002 -> PAID_OFF,  outstanding principal 0.00,     no next payment
+CTR-1003 -> OVERDUE,   outstanding principal 12450.50, next payment 2026-09-15
+CTR-1004 -> CANCELLED, outstanding principal 0.00,     no next payment
 ```
 
 Later this implementation can be replaced without changing the AI tool or application service.

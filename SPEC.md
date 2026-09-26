@@ -916,11 +916,12 @@ Conceptual API:
 ```java
 public interface KnowledgeRetriever {
 
-    List<KnowledgeChunk> retrieve(
-            String query,
-            int maxResults);
+    List<KnowledgeChunk> retrieve(String query);
 }
 ```
+
+The maximum number of results and the minimum relevance score are configuration properties
+(`knowledge.retrieval.max-results`, `knowledge.retrieval.min-relevance-score`) rather than call arguments.
 
 Responsibilities:
 

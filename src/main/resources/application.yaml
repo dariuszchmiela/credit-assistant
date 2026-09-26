@@ -1,6 +1,10 @@
 spring:
   application:
     name: credit-assistant
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:credit_assistant}
+    username: ${DB_USERNAME:credit_assistant}
+    password: ${DB_PASSWORD:credit_assistant}
 
 langchain4j:
   ollama:
@@ -8,3 +12,14 @@ langchain4j:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       model-name: ${OLLAMA_MODEL:qwen3:8b}
       timeout: ${OLLAMA_TIMEOUT:PT3M}
+
+knowledge:
+  embedding-table: product_knowledge_embedding
+  ingestion:
+    # Re-ingests the bundled mock product documents on startup, replacing only their previous chunks.
+    enabled: ${KNOWLEDGE_INGESTION_ENABLED:true}
+    chunk-size: 400
+    chunk-overlap: 0
+  retrieval:
+    max-results: 3
+    min-relevance-score: 0.7

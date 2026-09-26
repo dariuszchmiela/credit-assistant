@@ -1,0 +1,20 @@
+# Local development infrastructure. Default credentials are for local use only.
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${DB_NAME:-credit_assistant}
+      POSTGRES_USER: ${DB_USERNAME:-credit_assistant}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-credit_assistant}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
