@@ -1,12 +1,14 @@
 package pl.dch.creditassistant.chat.application;
 
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,7 +26,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * FR-007 end to end through the real LangChain4j AI service, RAG augmentation and tool execution.
  * The external LLM is replaced by a scripted {@link ChatModel} that records every request it would send out:
  * the first call asks for {@code getContractStatus}, the second one answers. The contract number is typed in
- * lower case, so the test also proves canonical resolution to the existing CTR-1001 contract.
+ * lower case, so the test also proves canonical resolution to the existing CTR-1001 contract. The tools offered to
+ * the LLM are recorded too: {@code getContractStatus} is offered only when the message contained a contract number.
  */
 @SpringBootTest(properties = "spring.autoconfigure.exclude=dev.langchain4j.ollama.spring.OllamaAutoConfiguration")
 @Import({TestcontainersConfiguration.class, ChatPiiBoundaryIntegrationTest.ScriptedChatModelConfiguration.class})
@@ -39,6 +42,11 @@ class ChatPiiBoundaryIntegrationTest {
     @Autowired
     private ScriptedChatModel chatModel;
 
+    @BeforeEach
+    void resetRecordedRequests() {
+        chatModel.requests.clear();
+    }
+
     @Test
     void shouldKeepRawPiiOutOfEveryLlmRequestIncludingToolResults() {
         String answer = chatService.chat(
@@ -46,6 +54,8 @@ class ChatPiiBoundaryIntegrationTest {
 
         List<ChatRequest> requests = chatModel.requests;
         assertThat(requests).as("tool call round trip").hasSize(2);
+        assertThat(offeredToolNames(requests.getFirst()))
+                .containsExactlyInAnyOrder("getContractStatus", "calculateInstallment", "checkEligibility");
         assertThat(requests).allSatisfy(request -> assertThat(request.messages().toString())
                 .doesNotContainIgnoringCase(RAW_CONTRACT_NUMBER)
                 .doesNotContain(RAW_PESEL));
@@ -60,6 +70,20 @@ class ChatPiiBoundaryIntegrationTest {
         assertThat(answer).isEqualTo(ScriptedChatModel.ANSWER);
     }
 
+    @Test
+    void shouldNotOfferContractToolWhenMessageContainsNoContractNumber() {
+        String answer = chatService.chat("Can a borrower make a partial early repayment?");
+
+        assertThat(chatModel.requests).as("answered without a tool call").singleElement()
+                .satisfies(request -> assertThat(offeredToolNames(request))
+                        .containsExactlyInAnyOrder("calculateInstallment", "checkEligibility"));
+        assertThat(answer).isEqualTo(ScriptedChatModel.PRODUCT_ANSWER);
+    }
+
+    private static List<String> offeredToolNames(ChatRequest request) {
+        return request.toolSpecifications().stream().map(ToolSpecification::name).toList();
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class ScriptedChatModelConfiguration {
 
@@ -72,6 +96,7 @@ class ChatPiiBoundaryIntegrationTest {
     static class ScriptedChatModel implements ChatModel {
 
         static final String ANSWER = "Contract [CONTRACT_NUMBER_1] is ACTIVE.";
+        static final String PRODUCT_ANSWER = "Partial early repayment is possible.";
 
         private final List<ChatRequest> requests = new CopyOnWriteArrayList<>();
 
@@ -80,8 +105,13 @@ class ChatPiiBoundaryIntegrationTest {
             requests.add(chatRequest);
             ChatMessage lastMessage = chatRequest.messages().getLast();
 
+            boolean contractToolOffered = chatRequest.toolSpecifications().stream()
+                    .anyMatch(tool -> tool.name().equals("getContractStatus"));
+
             AiMessage reply = lastMessage instanceof ToolExecutionResultMessage
                     ? AiMessage.from(ANSWER)
+                    : !contractToolOffered
+                    ? AiMessage.from(PRODUCT_ANSWER)
                     : AiMessage.from(ToolExecutionRequest.builder()
                             .id("call-1")
                             .name("getContractStatus")

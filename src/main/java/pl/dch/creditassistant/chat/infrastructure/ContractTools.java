@@ -3,7 +3,6 @@ package pl.dch.creditassistant.chat.infrastructure;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.invocation.InvocationParameters;
-import org.springframework.stereotype.Component;
 import pl.dch.creditassistant.chat.application.ChatInvocationParameters;
 import pl.dch.creditassistant.credit.contract.application.ContractStatusService;
 import pl.dch.creditassistant.credit.contract.domain.CreditContract;
@@ -17,8 +16,10 @@ import java.util.Optional;
  * FR-003 tool with FR-007 masking: the LLM only knows contract placeholders such as {@code [CONTRACT_NUMBER_1]}.
  * The placeholder is resolved to the original contract number inside Java, and the result sent back to the LLM
  * identifies the contract by the same placeholder, never by its number.
+ * <p>
+ * Deliberately not a Spring bean: {@code @AiService} would wire it as a static tool of every chat request.
+ * It is exposed per request by {@link ContractToolProvider}.
  */
-@Component
 public class ContractTools {
 
     private static final String TOOL_NAME = "getContractStatus";

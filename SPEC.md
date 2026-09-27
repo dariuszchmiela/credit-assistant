@@ -1632,6 +1632,10 @@ Selected mechanism:
 - the tool result identifies the contract by the same placeholder, so raw contract numbers never reach the LLM,
   including in the follow-up LLM call after tool execution,
 - a placeholder that is not part of the current invocation resolves to nothing (`INVALID_CONTRACT_REFERENCE`),
+- `getContractStatus` is offered to the LLM only for a chat request whose `ProtectedValues` contain at least one
+  contract number; it is supplied per invocation by a LangChain4j `ToolProvider`, so a question without a contract
+  number cannot trigger a contract lookup, while `calculateInstallment` and `checkEligibility` are always offered
+  (the MCP server is unaffected and always exposes all three tools),
 - model answers keep the placeholders; original values are not restored into the response.
 
 ## 44. Prompt Logging

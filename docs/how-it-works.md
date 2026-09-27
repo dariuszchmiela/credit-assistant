@@ -149,7 +149,8 @@ The LangChain4j Spring Boot starter generates its implementation and wires in:
 
 - the Ollama chat model (`langchain4j.ollama.chat-model.*`, default `qwen3:8b`),
 - the `RetrievalAugmentor` bean,
-- the `@Tool` beans,
+- the `@Tool` beans (`InstallmentTools`, `EligibilityTools`),
+- the `ToolProvider` bean (`ContractToolProvider`, see below),
 - the `ChatModelListener` bean.
 
 The system message sets the rules of the assistant:
@@ -165,7 +166,10 @@ There is no chat memory: each request is independent.
 
 ## 7. Deterministic tool selection and execution
 
-The model sees three tools, each a Spring component in `chat.infrastructure`:
+There are three tools in `chat.infrastructure`. `InstallmentTools` and `EligibilityTools` are Spring components
+offered on every request. `ContractTools` is not a bean: `ContractToolProvider`, a LangChain4j `ToolProvider`
+consulted once per chat invocation, offers `getContractStatus` only when the request's `ProtectedValues` contain a
+contract number. A question without a contract number therefore cannot lead to a contract lookup.
 
 | Tool | Class | Parameters visible to the model |
 |---|---|---|

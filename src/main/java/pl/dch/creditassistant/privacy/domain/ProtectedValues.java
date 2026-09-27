@@ -39,6 +39,13 @@ public final class ProtectedValues {
         return Optional.ofNullable(originalsByCategory.getOrDefault(category, Map.of()).get(placeholder));
     }
 
+    /**
+     * @return whether at least one placeholder of the given category can be resolved
+     */
+    public boolean containsAny(PiiCategory category) {
+        return !originalsByCategory.getOrDefault(category, Map.of()).isEmpty();
+    }
+
     @Override
     public String toString() {
         Map<PiiCategory, Integer> counts = new HashMap<>();
