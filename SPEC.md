@@ -243,6 +243,22 @@ The application shall also remain runnable directly from IntelliJ or Maven for d
 
 No external infrastructure shall be required other than the configured LLM API.
 
+Implementation decisions:
+
+- `Dockerfile`: multi-stage build — `maven:3.9.16-eclipse-temurin-25` runs `mvn -DskipTests package` (the
+  Testcontainers suite needs a Docker daemon and runs with `mvn test` instead); the runtime stage
+  `eclipse-temurin:25.0.4.1_1-jre` contains only the executable jar, runs as the non-root `app` user and exposes
+  `8080`. No credentials or endpoints are baked into the image.
+- `compose.yaml`: services `postgres` (`pgvector/pgvector:pg17`, `pg_isready` healthcheck, `postgres-data` volume,
+  published port for direct development) and `app` (built from the `Dockerfile`, port `8080`).
+  `app` starts only when `postgres` is healthy (`depends_on: condition: service_healthy`).
+- In Compose the application reaches the database as `postgres:5432`; `DB_NAME`, `DB_USERNAME` and `DB_PASSWORD`
+  use the same variables and defaults for both services.
+- The LLM stays outside Compose. `OLLAMA_BASE_URL` defaults to `http://host.docker.internal:11434` (Ollama on the
+  Docker host, mapped through `host-gateway` so it also resolves on Linux) and can be overridden.
+- Direct development is unchanged: `docker compose up -d postgres`, then IntelliJ or `mvn spring-boot:run` with the
+  `application.yaml` defaults (`localhost:5432`, `http://localhost:11434`). There is no Docker-specific profile.
+
 ### FR-011 — Integration testing
 
 Infrastructure-dependent integration tests shall use Testcontainers.

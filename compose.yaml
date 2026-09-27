@@ -1,4 +1,6 @@
-# Local development infrastructure. Default credentials are for local use only.
+# Local development stack (FR-010). Default credentials are for local use only.
+# Full stack:       docker compose up --build
+# Database only:    docker compose up -d postgres   (then run the application from IntelliJ or Maven)
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -15,6 +17,26 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Inside the Compose network the database is the postgres service on its container port.
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-credit_assistant}
+      DB_USERNAME: ${DB_USERNAME:-credit_assistant}
+      DB_PASSWORD: ${DB_PASSWORD:-credit_assistant}
+      # The LLM stays outside Compose; by default Ollama on the Docker host. Override for another endpoint.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      # Makes host.docker.internal resolve to the Docker host on Linux too (built in on Docker Desktop).
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${APP_PORT:-8080}:8080"
 
 volumes:
   postgres-data:
