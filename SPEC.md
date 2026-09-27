@@ -1733,6 +1733,10 @@ Lifecycle (owned by the chat application service):
   invocations can reference it by foreign key. While it is running, completion timestamp, status and duration are
   empty (`NULL`); there is no separate in-progress status.
 - On success it is updated with the final model answer (masked again before persistence) and `SUCCESS`.
+  This defensive masking is telemetry protection, unlike the mandatory fail-closed input masking: if it fails after
+  a successful assistant response, the final response is omitted (`NULL`, never stored unmasked or partially masked),
+  the status is still `SUCCESS`, a warning with the interaction identifier and exception type only is logged, and the
+  answer is returned to the advisor unchanged.
 - If the model call fails it is updated to `FAILED` without a final response, and the original exception is rethrown.
 - If masking itself fails, the model is not called and the interaction is stored as `REJECTED_PRIVACY` without any
   advisor message.

@@ -51,20 +51,24 @@ public class ChatService {
         AdvisorInteraction started = AdvisorInteraction.started(interactionId, startedAt, masking.maskedText().text());
         advisorInteractionRecorder.record(started);
 
+        String answer;
         try {
-            String answer = creditAssistant.chat(
+            answer = creditAssistant.chat(
                     masking.maskedText().text(),
                     ChatInvocationParameters.of(interactionId, masking.protectedValues())
             );
-            advisorInteractionRecorder.record(started.succeeded(Instant.now(), elapsedMillis(startNanos), mask(answer)));
-            log.info("Completed advisor interaction {} status=SUCCESS", interactionId);
-
-            return answer;
         } catch (RuntimeException exception) {
             advisorInteractionRecorder.record(started.failed(Instant.now(), elapsedMillis(startNanos)));
             log.warn("Failed advisor interaction {}: {}", interactionId, exception.getClass().getName());
             throw exception;
         }
+
+        // Outside the model try block: a telemetry sanitization failure must not turn a successful answer into FAILED.
+        String maskedFinalResponse = maskFinalResponseForPersistence(answer, interactionId);
+        advisorInteractionRecorder.record(started.succeeded(Instant.now(), elapsedMillis(startNanos), maskedFinalResponse));
+        log.info("Completed advisor interaction {} status=SUCCESS", interactionId);
+
+        return answer;
     }
 
     /**
@@ -85,9 +89,23 @@ public class ChatService {
 
     /**
      * Defensive masking of the final answer before it is persisted; the answer returned to the advisor is unchanged.
+     * <p>
+     * This is telemetry protection, not the fail-closed input masking: the assistant has already answered. If
+     * sanitization fails, the response is omitted from observability ({@code null}) rather than persisted unmasked
+     * or partially masked, and the successful advisor response is preserved.
      */
-    private String mask(String answer) {
-        return answer == null ? null : piiMasker.mask(answer).maskedText().text();
+    private String maskFinalResponseForPersistence(String answer, UUID interactionId) {
+        if (answer == null) {
+            return null;
+        }
+        try {
+            return piiMasker.mask(answer).maskedText().text();
+        } catch (RuntimeException exception) {
+            // Only the type is logged: the message could contain the unmasked answer.
+            log.warn("Advisor interaction {}: final response masking failed ({}), response omitted from observability",
+                    interactionId, exception.getClass().getName());
+            return null;
+        }
     }
 
     private long elapsedMillis(long startNanos) {

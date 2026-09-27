@@ -12,7 +12,8 @@ import java.util.UUID;
  * they are set together when it completes.
  *
  * @param maskedAdvisorMessage {@code null} only when masking itself failed ({@code REJECTED_PRIVACY})
- * @param maskedFinalResponse  {@code null} unless the interaction succeeded
+ * @param maskedFinalResponse  {@code null} for non-success interactions, and also for {@code SUCCESS} when the
+ *                             defensive masking of the final response failed (unsafe content is never persisted)
  */
 public record AdvisorInteraction(
         UUID interactionId,

@@ -147,6 +147,40 @@ class ChatServiceTest {
         });
     }
 
+    @Test
+    void shouldCompleteSuccessfullyWithoutFinalResponseWhenFinalResponseMaskingFails() {
+        String answer = "Contract " + RAW_CONTRACT_NUMBER + " belongs to PESEL " + RAW_PESEL + ".";
+        creditAssistant.answer = answer;
+        PiiMasker failingOnAnswerMasker = new PiiMasker() {
+            @Override
+            public PiiMaskingResult mask(String text) {
+                if (text.equals(answer)) {
+                    throw new IllegalStateException("masking failed on " + text);
+                }
+                return super.mask(text);
+            }
+        };
+        ChatService serviceWithFailingAnswerMasking = chatService(failingOnAnswerMasker);
+
+        String returned = serviceWithFailingAnswerMasking.chat("Owner of " + RAW_CONTRACT_NUMBER + "?");
+
+        assertThat(returned).as("original answer returned unchanged").isEqualTo(answer);
+        assertThat(creditAssistant.calls).as("assistant called once").isEqualTo(1);
+        assertThat(creditAssistant.maskedMessage).as("input masked normally").isEqualTo("Owner of [CONTRACT_NUMBER_1]?");
+        UUID interactionId = ChatInvocationParameters.interactionId(creditAssistant.invocationParameters);
+        assertThat(savedInteractions).hasSize(2)
+                .allSatisfy(interaction -> assertThat(interaction.interactionId()).isEqualTo(interactionId));
+        assertThat(savedInteractions.getFirst().status()).as("saved when started").isNull();
+        assertThat(savedInteractions.getLast()).satisfies(completed -> {
+            assertThat(completed.status()).isEqualTo(AdvisorInteractionStatus.SUCCESS);
+            assertThat(completed.maskedFinalResponse()).as("unsafe response omitted").isNull();
+            assertThat(completed.maskedAdvisorMessage()).isEqualTo("Owner of [CONTRACT_NUMBER_1]?");
+            assertThat(completed.durationMillis()).isNotNegative();
+        });
+        assertThat(savedInteractions).allSatisfy(interaction ->
+                assertThat(interaction.toString()).doesNotContain(RAW_PESEL).doesNotContain("masking failed"));
+    }
+
     private ChatService chatService(PiiMasker piiMasker) {
         return new ChatService(piiMasker, creditAssistant, new AdvisorInteractionRecorder(savedInteractions::add));
     }
@@ -159,9 +193,11 @@ class ChatServiceTest {
         private InvocationParameters invocationParameters;
         private String answer = ANSWER;
         private RuntimeException failure;
+        private int calls;
 
         @Override
         public String chat(String maskedMessage, InvocationParameters invocationParameters) {
+            calls++;
             this.maskedMessage = maskedMessage;
             this.invocationParameters = invocationParameters;
             if (failure != null) {
