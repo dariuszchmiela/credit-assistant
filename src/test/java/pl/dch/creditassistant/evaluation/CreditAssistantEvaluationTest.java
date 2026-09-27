@@ -1,6 +1,7 @@
 package pl.dch.creditassistant.evaluation;
 
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.TestFactory;
@@ -72,10 +73,19 @@ class CreditAssistantEvaluationTest {
     @Autowired
     private Environment environment;
 
+    /**
+     * Fresh state for every execution of this class in the same JVM; the timer starts before any setup step that
+     * can fail (Spring context, Ollama availability), so the summary duration is meaningful even then.
+     */
+    @BeforeAll
+    static void initializeSuite() {
+        RESULTS.clear();
+        suiteStartNanos = System.nanoTime();
+    }
+
     @TestFactory
     Stream<DynamicTest> evaluationSet() throws IOException, InterruptedException {
         requireConfiguredModelIsAvailable();
-        suiteStartNanos = System.nanoTime();
 
         return EvaluationDataset.load().cases().stream()
                 .map(evaluationCase -> DynamicTest.dynamicTest(
