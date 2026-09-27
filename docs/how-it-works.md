@@ -1,299 +1,368 @@
-# Credit Assistant — How It Works
+# Credit Assistant: How It Works
 
-## Current Architecture
+This document follows one advisor request through the code and explains why each boundary exists. For an overview and
+setup instructions, see the [README](../README.md). The requirements are in [SPEC.md](../SPEC.md).
 
-The application is currently a Spring Boot application using LangChain4j with a locally running Ollama model.
+All classes are under `pl.dch.creditassistant`.
 
-The current request flow is:
+## Overview
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Advisor
+    participant C as ChatController
+    participant S as ChatService
+    participant M as PiiMasker
+    participant R as AdvisorInteractionRecorder
+    participant A as CreditAssistant (LangChain4j)
+    participant K as KnowledgeRetriever (pgvector)
+    participant L as Ollama
+    participant T as ContractTools
+    participant CS as ContractStatusService
+
+    Advisor->>C: POST /api/chat {"message": "Status of CTR-1001?"}
+    C->>S: chat(rawMessage)
+    S->>M: mask(rawMessage)
+    M-->>S: "Status of [CONTRACT_NUMBER_1]?" + ProtectedValues
+    S->>R: record(started, masked message)
+    S->>A: chat(maskedMessage, InvocationParameters)
+    A->>K: retrieve(masked question)
+    K-->>A: product documentation chunks
+    A->>L: LLM call 1 (masked message + documentation + tool specs)
+    L-->>A: tool request getContractStatus("[CONTRACT_NUMBER_1]")
+    A->>T: getContractStatus("[CONTRACT_NUMBER_1]", InvocationParameters)
+    T->>CS: findContract("CTR-1001")
+    CS-->>T: CreditContract
+    T-->>A: "contractReference=[CONTRACT_NUMBER_1], status=ACTIVE, ..."
+    A->>L: LLM call 2 (with tool result)
+    L-->>A: final answer
+    A-->>S: answer
+    S->>R: record(succeeded, masked answer)
+    S-->>C: answer (unchanged)
+    C-->>Advisor: {"answer": "..."}
+```
+
+The observability records (one advisor interaction, two LLM calls and one tool invocation) are written as side effects
+of the steps above. They are described in [section 10](#10-observability-lifecycle).
+
+## 1. Inbound REST request
+
+`chat.api.ChatController` exposes `POST /api/chat`. It accepts `ChatRequest(message)`, validated as `@NotBlank`, and
+returns `ChatResponse(answer)`. The controller contains no AI or business logic. It calls `ChatService.chat(...)` and
+wraps the result.
+
+## 2. ChatService: the AI boundary
+
+`chat.application.ChatService` is the only way into the assistant. For each request it:
+
+1. creates a new interaction ID (`UUID`) and starts timing,
+2. masks the raw message (section 3),
+3. records the advisor interaction as started, with the masked message only,
+4. calls `CreditAssistant` with the masked text and internal invocation parameters (section 4),
+5. records the outcome and returns the answer.
+
+It handles three outcomes:
+
+| Situation | Stored status | Advisor receives |
+|---|---|---|
+| Input masking throws | `REJECTED_PRIVACY` (no message stored) | `IllegalStateException("Advisor message rejected: PII masking failed")`, without the cause attached |
+| Assistant or model throws | `FAILED` | the original exception, rethrown |
+| Assistant returns an answer | `SUCCESS` | the answer, unchanged |
+
+Input masking fails closed because it guards the model boundary: nothing unmasked may reach the LLM. The cause of a
+masking failure is deliberately not attached, because its message could contain the raw input.
+
+The final answer is masked again before it is persisted. This is telemetry protection, not a business step. The model
+could repeat a value that looks like PII. `maskFinalResponseForPersistence` runs outside the `try` block around the
+model call. If it throws, the interaction is still `SUCCESS`, `masked_final_response` is stored as `NULL` (never the
+unmasked text), only the exception type is logged, and the advisor still gets the answer.
+
+## 3. Privacy masking and protected values
+
+`privacy.application.PiiMasker` is deterministic and uses no LLM. It replaces:
+
+- contract numbers (`CTR-<digits>`, `CR-<yyyy>-<6 digits>`, case-insensitive) with `[CONTRACT_NUMBER_n]`, normalized to
+  upper case, so `ctr-1001` and `CTR-1001` share a placeholder,
+- standalone 11-digit numbers (PESEL-like, checksum not verified) with `[PESEL_n]`.
+
+Placeholders are numbered per category in order of first appearance, and repeated values reuse theirs.
+
+The result, `PiiMaskingResult`, holds:
+
+- `MaskedText`: the masked text and the detected categories. This is the only form of the message that reaches the
+  model, RAG, logs or the database.
+- `ProtectedValues`: a placeholder-to-original mapping for **contract numbers only**, because `getContractStatus`
+  needs the real number. PESEL masking is one-way: the mapping is discarded inside `mask(...)`. `ProtectedValues.toString()`
+  prints counts, not values.
+
+`PiiMasker` is also used by the LLM call listener, the final-response masking, and the evaluation suite's diagnostics.
+
+## 4. Invocation parameters and request correlation
+
+`chat.application.ChatInvocationParameters` builds a LangChain4j `InvocationParameters` with two entries:
+
+- `interactionId`: the advisor interaction ID,
+- `protectedValues`: the `ProtectedValues` of this request.
+
+LangChain4j passes invocation parameters to tools and to the retrieval augmentor. They are never part of a prompt, so
+the model does not see original values or IDs.
+
+LLM calls need correlation too. In LangChain4j 1.20, `ChatModelListener` callbacks do not receive the invocation
+context. To work around this, `chat.infrastructure.InteractionCorrelatingRetrievalAugmentor` stamps the interaction ID
+onto the augmented `UserMessage` as an attribute. Message attributes are internal metadata and are not sent to Ollama.
+Every model call in the invocation, including the calls after a tool result, carries that user message, so
+`AiObservabilityChatModelListener` can read the ID from it.
+
+## 5. RAG augmentation
+
+`chat.infrastructure.CreditAssistantRagConfiguration` defines the single `RetrievalAugmentor` bean. `@AiService` picks it
+up automatically. It is built as:
 
 ```text
-Client
-  |
-  | POST /api/chat
-  v
-ChatController
-  |
-  v
-CreditAssistant (@AiService)
-  |
-  v
-LangChain4j
-  |
-  v
-OllamaChatModel
-  |
-  v
-Local LLM
-  |
-  | decides whether a tool is required
-  v
-ContractTools
-  |
-  v
-ContractStatusService
-  |
-  v
-ContractRepository
-  |
-  v
-InMemoryContractRepository
+InteractionCorrelatingRetrievalAugmentor
+  -> DefaultRetrievalAugmentor
+       -> ProductKnowledgeContentRetriever
+            -> knowledge.application.KnowledgeRetriever
 ```
 
-## 1. REST API
+For every chat request, `ProductKnowledgeContentRetriever` passes the masked question to `KnowledgeRetriever`. It then
+turns each returned `KnowledgeChunk` into content labeled `[Product documentation: <title>]`, which LangChain4j adds to
+the user message.
 
-`ChatController` exposes:
+`knowledge.infrastructure.LangChain4jKnowledgeRetriever` embeds the query with the in-process `all-MiniLM-L6-v2`
+(quantized) model and searches pgvector (`knowledge.retrieval.max-results: 3`, `min-relevance-score: 0.7`). It maps the
+matches to the framework-free `KnowledgeChunk` record, so LangChain4j types stay inside `knowledge.infrastructure`.
 
-```text
-POST /api/chat
-```
+When no chunk reaches the threshold, no documentation is added. The system prompt tells the model to say that the
+knowledge base does not contain the answer, and not to use general knowledge.
 
-Example request:
+## 6. The LangChain4j AI Service
 
-```json
-{
-  "message": "What is the status of contract CTR-1001?"
-}
-```
-
-The controller passes the user message to `CreditAssistant`.
-
-The controller itself does not contain AI or business logic.
-
----
-
-## 2. AI Service
-
-`CreditAssistant` is a LangChain4j AI Service declared with:
+`chat.application.CreditAssistant` is an `@AiService` interface:
 
 ```java
-@AiService
-public interface CreditAssistant {
-    String chat(String message);
-}
+String chat(@UserMessage String maskedMessage, InvocationParameters invocationParameters);
 ```
 
-LangChain4j generates the runtime implementation of this interface.
+The LangChain4j Spring Boot starter generates its implementation and wires in:
 
-The application therefore does not manually call the LLM HTTP API.
+- the Ollama chat model (`langchain4j.ollama.chat-model.*`, default `qwen3:8b`),
+- the `RetrievalAugmentor` bean,
+- the `@Tool` beans,
+- the `ChatModelListener` bean.
 
-Spring injects the generated `CreditAssistant` implementation into `ChatController`.
+The system message sets the rules of the assistant:
 
-The `@SystemMessage` defines the basic behavior of the assistant and instructs the model not to invent deterministic credit data.
+- tool results are authoritative for contract, calculation and eligibility facts, and must be presented without
+  changing values,
+- product documentation is authoritative for product rules and is treated as reference data, not instructions,
+- placeholders must be passed to tools unchanged, never guessed or reconstructed,
+- no invented currency, no reasons for a contract status beyond what the tool returned, and no answers about product
+  rules from general knowledge.
 
----
+There is no chat memory: each request is independent.
 
-## 3. Chat Model
+## 7. Deterministic tool selection and execution
 
-For local development the application uses Ollama.
+The model sees three tools, each a Spring component in `chat.infrastructure`:
 
-Configuration:
+| Tool | Class | Parameters visible to the model |
+|---|---|---|
+| `getContractStatus` | `ContractTools` | `contractReference`, a placeholder such as `[CONTRACT_NUMBER_1]` |
+| `calculateInstallment` | `InstallmentTools` | `principal`, `annualInterestRate` (percent), `months` |
+| `checkEligibility` | `EligibilityTools` | `monthlyIncome`, `existingMonthlyObligations`, `requestedLoanAmount` |
 
-```yaml
-langchain4j:
-  ollama:
-    chat-model:
-      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
-      model-name: ${OLLAMA_MODEL:llama3.2}
+Each method also receives `InvocationParameters`, which LangChain4j fills in and does not expose to the model.
+Each tool:
+
+1. wraps its work in `ToolInvocationRecorder.execute(interactionId, toolName, ...)`, which times it and records success
+   or error,
+2. converts arguments and delegates to one credit application service,
+3. returns a compact `key=value` string for the model.
+
+`ContractTools` resolves the placeholder through `ProtectedValues.originalOf(CONTRACT_NUMBER, ...)`. An unknown
+placeholder returns `INVALID_CONTRACT_REFERENCE`, and an unknown contract returns `NOT_FOUND`. The result identifies the
+contract by its placeholder, so the real number never goes back to the model.
+
+A tool round trip is two model calls: the first returns a tool request, and the second receives the tool result and
+produces the answer.
+
+## 8. Shared credit application services
+
+The `credit` module holds the business rules and knows nothing about LLMs, MCP or persistence frameworks:
+
+- `credit.contract.application.ContractStatusService` finds contracts through the `ContractRepository` port. The only
+  adapter is `credit.contract.infrastructure.InMemoryContractRepository`, with four mock contracts (`CTR-1001` to
+  `CTR-1004`).
+- `credit.installment.application.InstallmentCalculator` computes equal monthly installments (annuity) with
+  `BigDecimal`, rounded half-up to 2 decimals. It divides the principal evenly when the rate is 0. Input validation lives
+  here, so every adapter gets the same errors.
+- `credit.eligibility.application.EligibilityService` applies a fixed rule order. The first failing rule decides:
+  - income below 3000: `INCOME_TOO_LOW`,
+  - obligations above 50% of income: `OBLIGATIONS_TOO_HIGH`,
+  - requested amount above 12 times the monthly disposable income: `LOAN_AMOUNT_TOO_HIGH`,
+  - otherwise `ELIGIBLE`, with a generated explanation.
+
+`architecture.ArchitectureTest` (ArchUnit) enforces the boundaries:
+
+- `credit` has no dependencies on AI or persistence frameworks, or on other modules,
+- `mcp` only uses credit application services,
+- `chat` uses only the knowledge application API,
+- `domain` packages are free of frameworks.
+
+## 9. MCP path to the same capabilities
+
+`mcp.infrastructure.McpServerConfiguration` sets up an MCP server with the official MCP Java SDK
+(`McpServer.sync`):
+
+- **Transport:** `HttpServletStreamableServerTransportProvider` (Streamable HTTP), registered as a servlet at
+  `mcp.server.endpoint` (default `/mcp`) in the same embedded Tomcat as the REST API.
+- **Header validation:** `DefaultServerTransportSecurityValidator` checks the `Host` and `Origin` headers against
+  `mcp.server.allowed-hosts` / `allowed-origins` (default localhost). It rejects a bad `Host` with 421 and a bad
+  `Origin` with 403.
+
+`mcp.infrastructure.CreditMcpTools` registers `getContractStatus`, `calculateInstallment` and `checkEligibility`, with
+JSON input and output schemas. The handlers:
+
+- map arguments and call the same three credit services as the LangChain4j tools,
+- return structured content,
+- report an unknown contract as a normal result with `found = false`,
+- turn invalid business input (`IllegalArgumentException`) into a tool error result (`isError = true`).
+
+The MCP path works differently from chat:
+
+- there is no LLM and no `ChatService`, so the client sends real contract numbers and no masking happens,
+- MCP calls are not recorded in the observability tables,
+- there is no authentication.
+
+```mermaid
+flowchart LR
+    subgraph chat ["chat.infrastructure (LLM path)"]
+        CT["ContractTools"]
+        IT["InstallmentTools"]
+        ET["EligibilityTools"]
+    end
+    subgraph mcp ["mcp.infrastructure (MCP path)"]
+        MT["CreditMcpTools"]
+    end
+    subgraph credit ["credit (deterministic)"]
+        CSS["ContractStatusService"] --> REPO["InMemoryContractRepository"]
+        IC["InstallmentCalculator"]
+        ES["EligibilityService"]
+    end
+    CT --> CSS
+    IT --> IC
+    ET --> ES
+    MT --> CSS
+    MT --> IC
+    MT --> ES
 ```
 
-LangChain4j creates an `OllamaChatModel` from this configuration.
+## 10. Observability lifecycle
 
-Ollama exposes a local HTTP API, while the selected LLM runs locally.
+The `observability` module has three records. Each has a recorder in `observability.application` and a JDBC repository
+in `observability.infrastructure`.
 
-This means development does not require paid LLM API calls.
-
----
-
-## 4. Tool Calling
-
-Some questions cannot safely be answered using only the LLM.
-
-For example:
-
-```text
-What is the status of contract CTR-1001?
+```mermaid
+flowchart TD
+    AI["AdvisorInteraction<br/>advisor_interaction<br/>one POST /api/chat"]
+    LLM["AiInteraction<br/>ai_interaction<br/>one physical LLM call"]
+    TOOL["ToolInvocation<br/>tool_invocation<br/>one actual tool execution"]
+    LLM -- "advisor_interaction_id" --> AI
+    TOOL -- "advisor_interaction_id" --> AI
 ```
 
-The LLM must not invent the contract status.
+**Advisor interaction** (`AdvisorInteractionRecorder`, called by `ChatService`). The row is inserted when the request
+starts, with `completed_at`, `status` and `duration_millis` as `NULL`. The insert happens early so that LLM calls and
+tool invocations can reference it by foreign key. The row is then updated to `SUCCESS` or `FAILED`. A privacy
+rejection is written once as `REJECTED_PRIVACY`, without a message.
 
-Instead, LangChain4j exposes the following Java method to the model as a tool:
+**LLM call** (`chat.infrastructure.AiObservabilityChatModelListener` calling `AiInteractionRecorder`). The listener is
+attached to the chat model by the starter and writes one row per physical call. It stores:
 
-```java
-@Tool
-public String getContractStatus(String contractNumber)
-```
+- the model identifier (as reported by the provider),
+- the last user message, including the RAG content, masked again,
+- the model text response, masked again,
+- input and output token counts,
+- estimated cost from `AiCostCalculator` (tokens times configured prices per million tokens),
+- duration,
+- the names of tools the model requested.
 
-The tool description tells the LLM what the function does.
+Failed calls store the exception type as `error_type`, never its message. Unknown values are `NULL`, not zero.
 
-The parameter description tells the model what value should be passed to it.
+**Tool invocation** (`ToolInvocationRecorder`, called by each LangChain4j tool). This records that a tool actually
+ran: name, start time, duration, `SUCCESS` or `ERROR`. The tool names in `ai_interaction` are what the model *asked
+for*. `tool_invocation` records what *ran*.
 
-The LLM decides that it needs the tool and requests:
+Rules that apply to all three recorders:
 
-```text
-getContractStatus("CTR-1001")
-```
+- Only masked content is stored. Tool arguments, tool results and invocation parameters are never stored.
+- Recording is best-effort. A persistence exception is logged with the ID and exception type only, and never fails the
+  advisor request or the tool.
 
-LangChain4j executes the Java method.
+## 11. Persistence and pgvector
 
----
+One PostgreSQL 17 database with the pgvector extension (`pgvector/pgvector:pg17` in Compose and Testcontainers) holds
+two groups of tables:
 
-## 5. Tool Adapter
+- **Observability tables:** created by Flyway, `src/main/resources/db/migration/V1__create_ai_interaction.sql`. The
+  settings `baseline-on-migrate: true` and `baseline-version: 0` let V1 still run on older local databases that already
+  contain the vector table.
+- **`product_knowledge_embedding`:** created by LangChain4j `PgVectorEmbeddingStore` (`createTable(true)`, which also
+  creates the `vector` extension if needed). The vector dimension comes from the embedding model.
 
-`ContractTools` is an adapter between the AI layer and the deterministic application layer.
+Ingestion (`knowledge.infrastructure.KnowledgeIngestionRunner`, enabled by `knowledge.ingestion.enabled`) runs at
+startup. It loads the three documents listed in `BundledKnowledgeDocuments` from `src/main/resources/knowledge`, and
+`LangChain4jKnowledgeIngestionService` processes each one:
 
-It contains LangChain4j-specific annotations such as:
+1. normalizes whitespace with `TextNormalizer`, without changing the wording,
+2. splits it with `DocumentSplitters.recursive(400, 0)`,
+3. embeds the chunks,
+4. deletes the document's previous chunks by `document_id`, then stores the new ones.
 
-```java
-@Tool
-@P
-```
+Chunk metadata includes the document ID, title, type and version.
 
-It does not contain the actual contract business logic.
+## 12. Evaluation architecture
 
-Instead it delegates to:
+The evaluation suite is test code only, in `src/test/java/pl/dch/creditassistant/evaluation`.
 
-```text
-ContractStatusService
-```
+| Class | Role |
+|---|---|
+| `EvaluationDataset`, `EvaluationCase` | load and validate `src/test/resources/evaluation/credit-assistant-evaluation.json` (10 synthetic cases, one per `EvaluationCategory`) |
+| `CreditAssistantEvaluationTest` | `@SpringBootTest` with Testcontainers pgvector and the real configured Ollama model; one dynamic test per case |
+| `AnswerExpectations` | tolerant answer checks: required facts, required concepts, forbidden concepts |
+| `EvaluationResult`, `EvaluationSummary` | per-case result and the console summary |
 
-This separation prevents the credit domain from depending on LangChain4j.
+For each case the runner:
 
----
+1. deletes the previous observability rows,
+2. checks retrieval separately: it masks the question the same way `ChatService` does, calls `KnowledgeRetriever`, and
+   compares the returned document IDs,
+3. calls `ChatService.chat(...)`, the same entry point as the REST API,
+4. checks the answer against its expectations,
+5. checks the persisted execution evidence:
+   - exactly one advisor interaction with `SUCCESS`,
+   - the expected number of LLM calls, all linked to it,
+   - the expected set of tools in `tool_invocation`, all successful,
+6. checks PII: no raw value appears in any persisted message, prompt or response, and the expected placeholders are in
+   the masked advisor message.
 
-## 6. Application Service
+Failure diagnostics are masked and redacted before they are printed. There is no LLM-as-a-judge.
 
-`ContractStatusService` contains the application use case for retrieving a contract status.
+The test is tagged `ai-evaluation`:
 
-Its dependency is the abstraction:
+- the default Surefire configuration excludes it,
+- `mvn -Pai-evaluation test` runs only this test,
+- `EvaluationDatasetTest` validates the dataset structure in the normal build, without an LLM.
 
-```text
-ContractRepository
-```
+## Why it is built this way
 
-The service does not know whether contract information comes from:
-
-* memory,
-* PostgreSQL,
-* another microservice,
-* an external API.
-
-It only knows the repository interface.
-
----
-
-## 7. Repository
-
-`ContractRepository` defines the contract:
-
-```java
-Optional<CreditContract> findByContractNumber(String contractNumber);
-```
-
-The current MVP implementation is:
-
-```text
-InMemoryContractRepository
-```
-
-It contains several deterministic test contracts:
-
-```text
-CTR-1001 -> ACTIVE,    outstanding principal 85000.00, next payment 2026-10-15
-CTR-1002 -> PAID_OFF,  outstanding principal 0.00,     no next payment
-CTR-1003 -> OVERDUE,   outstanding principal 12450.50, next payment 2026-09-15
-CTR-1004 -> CANCELLED, outstanding principal 0.00,     no next payment
-```
-
-Later this implementation can be replaced without changing the AI tool or application service.
-
----
-
-## 8. Complete Tool Call Example
-
-User sends:
-
-```text
-What is the status of contract CTR-1001?
-```
-
-The flow is:
-
-```text
-1. ChatController receives the HTTP request.
-
-2. ChatController calls:
-   CreditAssistant.chat(...)
-
-3. LangChain4j sends the conversation and available tool definitions
-   to the local Ollama model.
-
-4. The model determines that contract status is deterministic data
-   and selects:
-   getContractStatus
-
-5. LangChain4j executes:
-   ContractTools.getContractStatus("CTR-1001")
-
-6. ContractTools calls:
-   ContractStatusService.getContractStatus("CTR-1001")
-
-7. ContractStatusService calls:
-   ContractRepository.findByContractNumber("CTR-1001")
-
-8. InMemoryContractRepository returns:
-   CreditContract("CTR-1001", ACTIVE)
-
-9. ContractStatusService returns:
-   ACTIVE
-
-10. ContractTools returns:
-    "ACTIVE"
-
-11. LangChain4j gives the tool result back to the LLM.
-
-12. The LLM produces a natural-language answer:
-
-    "The current status of contract CTR-1001 is Active."
-
-13. ChatController returns the answer as JSON.
-```
-
-## Key Architectural Rule
-
-The LLM is responsible for:
-
-```text
-understanding user intent
-choosing tools
-combining information
-generating natural-language answers
-```
-
-Java application services are responsible for:
-
-```text
-contract facts
-calculations
-eligibility decisions
-business rules
-```
-
-The LLM must never become the source of truth for deterministic business data.
-
-## Why This Architecture Matters
-
-The same application services can later be exposed through multiple interfaces:
-
-```text
-LangChain4j Tool
-        |
-        v
-Application Service
-        ^
-        |
-MCP Tool
-```
-
-The AI integration and MCP integration remain adapters.
-
-The underlying credit-domain logic stays independent from both technologies.
+- **Deterministic facts:** an LLM that makes up a contract status or an installment amount is a correctness bug in a
+  credit context. The model decides *what* to call and *how* to phrase the answer. Java decides the facts.
+- **One boundary for PII:** masking in `ChatService` before the model, RAG and persistence means no later component has
+  to be trusted with raw input. Only the one tool that needs an original value gets it, through invocation parameters.
+- **Adapters over shared services:** the LangChain4j and MCP tools are thin, so both give the same answers from the
+  same code. ArchUnit keeps business rules out of the adapters.
+- **Measurable AI behavior:** because tool executions and LLM calls are persisted and correlated, the evaluation suite
+  can check what actually happened instead of trusting the model's own claims.
