@@ -254,8 +254,10 @@ Implementation decisions:
   `app` starts only when `postgres` is healthy (`depends_on: condition: service_healthy`).
 - In Compose the application reaches the database as `postgres:5432`; `DB_NAME`, `DB_USERNAME` and `DB_PASSWORD`
   use the same variables and defaults for both services.
-- The LLM stays outside Compose. `OLLAMA_BASE_URL` defaults to `http://host.docker.internal:11434` (Ollama on the
-  Docker host, mapped through `host-gateway` so it also resolves on Linux) and can be overridden.
+- The LLM stays outside Compose. Compose forwards `OLLAMA_BASE_URL`, `OLLAMA_MODEL` and `OLLAMA_TIMEOUT` from the
+  host environment to `app`, each overridable. `OLLAMA_BASE_URL` defaults to `http://host.docker.internal:11434`
+  (Ollama on the Docker host, mapped through `host-gateway` so it also resolves on Linux); `OLLAMA_MODEL` (`qwen3:8b`)
+  and `OLLAMA_TIMEOUT` (`PT3M`) default to the same values as `application.yaml`.
 - Direct development is unchanged: `docker compose up -d postgres`, then IntelliJ or `mvn spring-boot:run` with the
   `application.yaml` defaults (`localhost:5432`, `http://localhost:11434`). There is no Docker-specific profile.
 

@@ -30,8 +30,10 @@ services:
       DB_NAME: ${DB_NAME:-credit_assistant}
       DB_USERNAME: ${DB_USERNAME:-credit_assistant}
       DB_PASSWORD: ${DB_PASSWORD:-credit_assistant}
-      # The LLM stays outside Compose; by default Ollama on the Docker host. Override for another endpoint.
+      # The LLM stays outside Compose; by default Ollama on the Docker host. Override for another endpoint/model.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-PT3M}
     extra_hosts:
       # Makes host.docker.internal resolve to the Docker host on Linux too (built in on Docker Desktop).
       - "host.docker.internal:host-gateway"
